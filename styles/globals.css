@@ -3,24 +3,32 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #0f0f0f;
-  --bg2: #161616;
-  --bg3: #1e1e1e;
-  --bg4: #252525;
-  --border: #2e2e2e;
-  --border2: #3a3a3a;
-  --text: #e8e6e1;
-  --text2: #9a9690;
-  --text3: #5c5a57;
-  --accent: #e8b84b;
-  --accent2: #c49a30;
-  --green: #4caf7d;
-  --green2: #2d6b4a;
-  --red: #e05a5a;
-  --red2: #8b2f2f;
-  --blue: #5a9ae0;
+  --bg: #f8fafc;
+  --bg2: #ffffff;
+  --bg3: #f1f5f9;
+  --bg4: #e2e8f0;
+
+  --border: #cbd5e1;
+  --border2: #94a3b8;
+
+  --text: #0f172a;
+  --text2: #475569;
+  --text3: #64748b;
+
+  --accent: #2563eb;
+  --accent2: #1d4ed8;
+
+  --green: #16a34a;
+  --green2: #dcfce7;
+
+  --red: #dc2626;
+  --red2: #fee2e2;
+
+  --blue: #3b82f6;
+
   --font: 'IBM Plex Sans Thai', sans-serif;
   --mono: 'IBM Plex Mono', monospace;
+
   --r: 4px;
 }
 
@@ -83,11 +91,21 @@ button.ghost:hover { background: var(--bg3); color: var(--text); }
   font-family: var(--mono);
   letter-spacing: 0.03em;
 }
-.badge-in { background: var(--green2); color: var(--green); }
-.badge-out { background: var(--red2); color: var(--red); }
-.badge-adjust { background: #1e2a3a; color: var(--blue); }
-.badge-return { background: #2a1e3a; color: #a07add; }
-.badge-low { background: #3a2a1e; color: var(--accent); }
+
+.badge-adjust {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.badge-return {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.badge-low {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
 
 .tag { display: inline-block; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); font-size: 11px; padding: 1px 6px; border-radius: 2px; }
 
