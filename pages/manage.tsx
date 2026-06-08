@@ -1,37 +1,34 @@
 import { useEffect, useState } from "react";
-import {
-  getAccessories, addAccessory, updateAccessory, deleteAccessory,
-  type Accessory,
-} from "@/lib/store";
+import { getAccessories, addAccessory, updateAccessory, deleteAccessory, type Accessory } from "@/lib/store";
 
-const UNITS = ["เส้น", "โหล", "ชิ้น", "ม้วน", "หลา", "กุรุส", "กิโล", "หลอด", "กิโลกรัม", "ขิ้น"];
+const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
 type FormData = Omit<Accessory, "id" | "created_at" | "updated_at">;
-
-const emptyForm = (): FormData => ({
-  type: "", acc_code: "", description: "", row: null,
-  color: "", size: "", quantity: 0, unit: "เส้น",
-  unit_cost: 0, min_quantity: 10,
-});
+const emptyForm = (): FormData => ({ type:"", acc_code:"", description:"", row:null, color:"", size:"", quantity:0, unit:"เส้น", unit_cost:0, min_quantity:10 });
 
 export default function ManagePage() {
-  const [items, setItems] = useState<Accessory[]>([]);
+  const [items, setItems]   = useState<Accessory[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
-  const [showModal, setShowModal] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormData>(emptyForm());
+  const [showModal, setShowModal]   = useState(false);
+  const [editId, setEditId]         = useState<string | null>(null);
+  const [form, setForm]             = useState<FormData>(emptyForm());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  useEffect(() => { setItems(getAccessories()); }, []);
+  useEffect(() => {
+    getAccessories().then(setItems).finally(() => setLoading(false));
+  }, []);
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const types = Array.from(new Set(items.map((i) => i.type))).sort();
+  const refresh = () => getAccessories().then(setItems);
+  const types   = Array.from(new Set(items.map((i) => i.type))).sort();
 
   const filtered = items.filter((i) => {
     if (filterType && i.type !== filterType) return false;
@@ -46,122 +43,115 @@ export default function ManagePage() {
     );
   });
 
-  const openAdd = () => { setEditId(null); setForm(emptyForm()); setShowModal(true); };
+  const openAdd  = () => { setEditId(null); setForm(emptyForm()); setShowModal(true); };
   const openEdit = (item: Accessory) => {
     setEditId(item.id);
-    setForm({
-      type: item.type, acc_code: item.acc_code, description: item.description,
-      row: item.row, color: item.color, size: item.size,
-      quantity: item.quantity, unit: item.unit, unit_cost: item.unit_cost,
-      min_quantity: item.min_quantity,
-    });
+    setForm({ type:item.type, acc_code:item.acc_code, description:item.description,
+      row:item.row, color:item.color, size:item.size, quantity:item.quantity,
+      unit:item.unit, unit_cost:item.unit_cost, min_quantity:item.min_quantity });
     setShowModal(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.type.trim()) { showToast("กรุณาระบุประเภทอุปกรณ์", "error"); return; }
-    if (editId) {
-      updateAccessory(editId, form);
-      showToast("อัพเดตแล้ว ✓", "success");
-    } else {
-      addAccessory(form);
-      showToast("เพิ่มรายการแล้ว ✓", "success");
+    setSaving(true);
+    try {
+      if (editId) { await updateAccessory(editId, form); showToast("อัพเดตแล้ว ✓", "success"); }
+      else        { await addAccessory(form);            showToast("เพิ่มรายการแล้ว ✓", "success"); }
+      await refresh();
+      setShowModal(false);
+    } catch (e: any) {
+      showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
+    } finally {
+      setSaving(false);
     }
-    setItems(getAccessories());
-    setShowModal(false);
   };
 
-  const handleDelete = (id: string) => {
-    deleteAccessory(id);
-    setItems(getAccessories());
-    setDeleteConfirm(null);
-    showToast("ลบรายการแล้ว", "success");
+  const handleDelete = async (id: string) => {
+    setSaving(true);
+    try {
+      await deleteAccessory(id);
+      await refresh();
+      setDeleteConfirm(null);
+      showToast("ลบรายการแล้ว", "success");
+    } catch (e: any) {
+      showToast(e.message ?? "ลบไม่ได้ — อาจมีรายการอ้างอิงอยู่", "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const f = (field: keyof FormData, val: string | number | null) => {
+  const f = (field: keyof FormData, val: string | number | null) =>
     setForm((prev) => ({ ...prev, [field]: val }));
-  };
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <input
-          placeholder="ค้นหา…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: "1 1 200px" }}
-        />
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width: "auto", minWidth: 160 }}>
+      <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
+        <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex:"1 1 200px" }} />
+        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width:"auto", minWidth:160 }}>
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <button className="primary" onClick={openAdd}>+ เพิ่มรายการใหม่</button>
-        <span style={{ alignSelf: "center", fontSize: 12, color: "var(--text3)" }}>{filtered.length} รายการ</span>
+        <span style={{ alignSelf:"center", fontSize:12, color:"var(--text3)" }}>{filtered.length} รายการ</span>
       </div>
 
-      <div className="card" style={{ overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table>
-            <thead>
-              <tr>
-                <th>ประเภท</th>
-                <th>รหัส</th>
-                <th>รายละเอียด</th>
-                <th>สี</th>
-                <th>ขนาด</th>
-                <th>แถว</th>
-                <th className="num">สต็อค</th>
-                <th>หน่วย</th>
-                <th className="num">ราคา</th>
-                <th className="num">ขั้นต่ำ</th>
-                <th>แก้ไข</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
-              )}
-              {filtered.map((item) => (
-                <tr key={item.id}>
-                  <td><span className="tag">{item.type}</span></td>
-                  <td style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text2)" }}>{item.acc_code || "—"}</td>
-                  <td style={{ maxWidth: 180 }}>{item.description || "—"}</td>
-                  <td style={{ color: "var(--text2)" }}>{item.color || "—"}</td>
-                  <td style={{ color: "var(--text2)" }}>{item.size || "—"}</td>
-                  <td style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>{item.row ?? "—"}</td>
-                  <td className="num" style={{ fontFamily: "var(--mono)", fontWeight: 500 }}>{item.quantity.toLocaleString()}</td>
-                  <td style={{ color: "var(--text2)" }}>{item.unit}</td>
-                  <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>฿{item.unit_cost.toFixed(2)}</td>
-                  <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text3)" }}>{item.min_quantity}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button className="ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => openEdit(item)}>แก้ไข</button>
-                      <button className="ghost" style={{ padding: "4px 8px", fontSize: 12, color: "var(--red)" }} onClick={() => setDeleteConfirm(item.id)}>ลบ</button>
-                    </div>
-                  </td>
+      <div className="card" style={{ overflow:"hidden" }}>
+        {loading ? (
+          <div style={{ padding:48, textAlign:"center", color:"var(--text3)" }}>กำลังโหลด…</div>
+        ) : (
+          <div style={{ overflowX:"auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
+                  <th className="num">สต็อค</th><th>หน่วย</th><th className="num">ราคา</th><th className="num">ขั้นต่ำ</th><th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.length === 0 && (
+                  <tr><td colSpan={11} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                )}
+                {filtered.map((item) => (
+                  <tr key={item.id}>
+                    <td><span className="tag">{item.type}</span></td>
+                    <td style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text2)" }}>{item.acc_code || "—"}</td>
+                    <td style={{ maxWidth:180 }}>{item.description || "—"}</td>
+                    <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
+                    <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
+                    <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{Number(item.quantity).toLocaleString()}</td>
+                    <td style={{ color:"var(--text2)" }}>{item.unit}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontSize:12 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text3)" }}>{Number(item.min_quantity).toLocaleString()}</td>
+                    <td>
+                      <div style={{ display:"flex", gap:4 }}>
+                        <button className="ghost" style={{ padding:"4px 8px", fontSize:12 }} onClick={() => openEdit(item)}>แก้ไข</button>
+                        <button className="ghost" style={{ padding:"4px 8px", fontSize:12, color:"var(--red)" }} onClick={() => setDeleteConfirm(item.id)}>ลบ</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* Add / Edit Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <div style={{ fontWeight: 500 }}>{editId ? "แก้ไขรายการ" : "เพิ่มรายการใหม่"}</div>
-              <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setShowModal(false)}>✕</button>
+              <div style={{ fontWeight:500 }}>{editId ? "แก้ไขรายการ" : "เพิ่มรายการใหม่"}</div>
+              <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setShowModal(false)}>✕</button>
             </div>
             <div className="modal-body">
               <div className="form-row form-grid form-grid-2">
                 <div>
                   <label className="form-label">ชนิดอุปกรณ์ *</label>
                   <input value={form.type} onChange={(e) => f("type", e.target.value)} placeholder="เช่น ซิป วีนัส" list="type-list" />
-                  <datalist id="type-list">
-                    {types.map((t) => <option key={t} value={t} />)}
-                  </datalist>
+                  <datalist id="type-list">{types.map((t) => <option key={t} value={t} />)}</datalist>
                 </div>
                 <div>
                   <label className="form-label">รหัสสินค้า</label>
@@ -211,7 +201,9 @@ export default function ManagePage() {
             </div>
             <div className="modal-footer">
               <button onClick={() => setShowModal(false)}>ยกเลิก</button>
-              <button className="primary" onClick={handleSave}>{editId ? "บันทึกการแก้ไข" : "เพิ่มรายการ"}</button>
+              <button className="primary" onClick={handleSave} disabled={saving}>
+                {saving ? "กำลังบันทึก…" : editId ? "บันทึกการแก้ไข" : "เพิ่มรายการ"}
+              </button>
             </div>
           </div>
         </div>
@@ -220,24 +212,24 @@ export default function ManagePage() {
       {/* Delete confirm */}
       {deleteConfirm && (
         <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
-          <div className="modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth:360 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <div style={{ fontWeight: 500, color: "var(--red)" }}>ยืนยันการลบ</div>
-              <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setDeleteConfirm(null)}>✕</button>
+              <div style={{ fontWeight:500, color:"var(--red)" }}>ยืนยันการลบ</div>
+              <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setDeleteConfirm(null)}>✕</button>
             </div>
             <div className="modal-body">
-              <p style={{ color: "var(--text2)" }}>
-                ต้องการลบรายการ <strong style={{ color: "var(--text)" }}>
-                  {items.find((i) => i.id === deleteConfirm)?.type} {items.find((i) => i.id === deleteConfirm)?.description}
-                </strong> ออกจากระบบ?
-              </p>
-              <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>
-                การลบจะไม่สามารถย้อนกลับได้ ประวัติรายการที่เกี่ยวข้องจะยังคงอยู่
+              <p style={{ color:"var(--text2)" }}>ต้องการลบ <strong style={{ color:"var(--text)" }}>
+                {items.find((i) => i.id === deleteConfirm)?.type} {items.find((i) => i.id === deleteConfirm)?.description}
+              </strong> ออกจากระบบ?</p>
+              <p style={{ fontSize:12, color:"var(--text3)", marginTop:8 }}>
+                ไม่สามารถลบได้หากยังมีประวัติรายการอ้างอิงอยู่
               </p>
             </div>
             <div className="modal-footer">
               <button onClick={() => setDeleteConfirm(null)}>ยกเลิก</button>
-              <button className="danger" onClick={() => handleDelete(deleteConfirm)}>ลบรายการ</button>
+              <button className="danger" onClick={() => handleDelete(deleteConfirm)} disabled={saving}>
+                {saving ? "กำลังลบ…" : "ลบรายการ"}
+              </button>
             </div>
           </div>
         </div>
