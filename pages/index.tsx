@@ -59,7 +59,7 @@ export default function StockPage() {
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <button onClick={() => setShowLow(!showLow)} style={showLow ? { background: "#3a2a1e", borderColor: "var(--accent)", color: "var(--accent)" } : {}}>
+        <button onClick={() => setShowLow(!showLow)} style={showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}}>
           ⚠ สต็อคต่ำ
         </button>
         <span style={{ alignSelf: "center", fontSize: 12, color: "var(--text3)" }}>{filtered.length} รายการ</span>

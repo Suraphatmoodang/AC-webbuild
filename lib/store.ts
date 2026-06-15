@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 export type Accessory = {
   id: string;
   type: string;
-  acc_code: string;
+  acc_code: string;        // Required per data dict
   description: string;
   row: number | null;
   color: string;
@@ -12,6 +12,8 @@ export type Accessory = {
   unit: string;
   unit_cost: number;
   min_quantity: number;
+  supplier: string;        // NEW
+  is_active: boolean;      // NEW
   created_at: string;
   updated_at: string;
 };
@@ -31,12 +33,10 @@ export type Transaction = {
 
 // ── Accessories ──────────────────────────────────────────────
 
-export async function getAccessories(): Promise<Accessory[]> {
-  const { data, error } = await supabase
-    .from("accessories")
-    .select("*")
-    .order("type")
-    .order("description");
+export async function getAccessories(activeOnly = false): Promise<Accessory[]> {
+  let q = supabase.from("accessories").select("*").order("type").order("description");
+  if (activeOnly) q = q.eq("is_active", true);
+  const { data, error } = await q;
   if (error) throw error;
   return data ?? [];
 }
@@ -68,10 +68,7 @@ export async function updateAccessory(
 }
 
 export async function deleteAccessory(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("accessories")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("accessories").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -86,9 +83,7 @@ export async function getTransactions(): Promise<Transaction[]> {
   return data ?? [];
 }
 
-export async function getTransactionsByAccessory(
-  accessory_id: string
-): Promise<Transaction[]> {
+export async function getTransactionsByAccessory(accessory_id: string): Promise<Transaction[]> {
   const { data, error } = await supabase
     .from("accessory_transactions")
     .select("*")
@@ -106,7 +101,6 @@ export async function addTransaction(
   note: string,
   created_by: string
 ): Promise<{ accessory: Accessory; transaction: Transaction } | { error: string }> {
-  // Fetch latest quantity
   const { data: acc, error: fetchErr } = await supabase
     .from("accessories")
     .select("*")
@@ -119,45 +113,27 @@ export async function addTransaction(
   let after = before;
   let txQty = qty;
 
-  if (type === "IN" || type === "RETURN") {
-    after = before + qty;
-    txQty = qty;
-  } else if (type === "OUT") {
-    after = before - qty;
-    txQty = qty;
-  } else if (type === "ADJUST") {
-    after = qty;
-    txQty = qty - before;
-  }
+  if (type === "IN" || type === "RETURN") { after = before + qty; txQty = qty; }
+  else if (type === "OUT")  { after = before - qty; txQty = qty; }
+  else if (type === "ADJUST") { after = qty; txQty = qty - before; }
 
   if (after < 0) return { error: "สต็อคไม่พอ" };
 
-  // Update stock
   const { data: updatedAcc, error: updateErr } = await supabase
     .from("accessories")
     .update({ quantity: after })
     .eq("id", accessory_id)
     .select()
     .single();
-
   if (updateErr) return { error: updateErr.message };
 
-  // Record transaction
   const { data: tx, error: txErr } = await supabase
     .from("accessory_transactions")
-    .insert({
-      accessory_id,
-      transaction_type: type,
-      quantity: txQty,
-      quantity_before: before,
-      quantity_after: after,
-      reference_no: reference_no ?? "",
-      note: note ?? "",
-      created_by: created_by ?? "",
-    })
+    .insert({ accessory_id, transaction_type: type, quantity: txQty,
+      quantity_before: before, quantity_after: after,
+      reference_no: reference_no ?? "", note: note ?? "", created_by: created_by ?? "" })
     .select()
     .single();
-
   if (txErr) return { error: txErr.message };
 
   return { accessory: updatedAcc, transaction: tx };

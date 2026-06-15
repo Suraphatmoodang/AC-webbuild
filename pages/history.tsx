@@ -83,13 +83,7 @@ export default function HistoryPage() {
             </option>
           ))}
         </select>
-        <button onClick={switchToAll} style={view === "all" ? { borderColor: "var(--accent)", color: "var(--accent)" } : {}}>
-          รายการทั้งหมด
-        </button>
-        <button disabled={!selectedItem} onClick={() => selectedItem && switchToLedger(selectedItem)}
-          style={view === "ledger" ? { borderColor: "var(--accent)", color: "var(--accent)" } : {}}>
-          แผ่นบัญชี
-        </button>
+
         <span style={{ alignSelf: "center", fontSize: 12, color: "var(--text3)" }}>{filteredTxns.length} รายการ</span>
       </div>
 

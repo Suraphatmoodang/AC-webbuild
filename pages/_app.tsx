@@ -7,7 +7,7 @@ const NAV = [
   { href: "/", label: "สต็อค", en: "Stock" },
   { href: "/transactions", label: "บันทึกรายการ", en: "Transactions" },
   { href: "/history", label: "ประวัติ", en: "History" },
-  { href: "/manage", label: "จัดการ", en: "Manage" },
+  { href: "/manage", label: "จัดการ", en: "Manage 🔒" },
 ];
 
 export default function App({ Component, pageProps }: AppProps) {

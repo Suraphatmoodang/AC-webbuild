@@ -1,26 +1,116 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import { getAccessories, addAccessory, updateAccessory, deleteAccessory, type Accessory } from "@/lib/store";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
 type FormData = Omit<Accessory, "id" | "created_at" | "updated_at">;
-const emptyForm = (): FormData => ({ type:"", acc_code:"", description:"", row:null, color:"", size:"", quantity:0, unit:"เส้น", unit_cost:0, min_quantity:10 });
+
+const emptyForm = (): FormData => ({
+  type: "", acc_code: "", description: "", row: null,
+  color: "", size: "", quantity: 0, unit: "เส้น",
+  unit_cost: 0, min_quantity: 10, supplier: "", is_active: true,
+});
+
+type FormErrors = Partial<Record<keyof FormData, string>>;
+
+function validate(form: FormData): FormErrors {
+  const errors: FormErrors = {};
+  if (!form.type.trim())  errors.type     = "กรุณาระบุประเภทอุปกรณ์";
+  if (!form.unit.trim())  errors.unit     = "กรุณาระบุหน่วย";
+  if (form.quantity < 0)  errors.quantity = "จำนวนต้องไม่ติดลบ";
+  return errors;
+}
+
+function TypeCombobox({ value, onChange, options, hasError }: {
+  value: string; onChange: (v: string) => void; options: string[]; hasError?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+  useEffect(() => { setQuery(value); }, [value]);
+  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase()));
+  const select = (opt: string) => { onChange(opt); setQuery(opt); setOpen(false); };
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="เช่น ซิป วีนัส"
+        style={hasError ? { borderColor: "var(--red)" } : {}}
+        autoComplete="off"
+      />
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          background: "var(--bg3)", border: "1px solid var(--border2)",
+          borderRadius: "var(--r)", zIndex: 200, maxHeight: 200, overflowY: "auto",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}>
+          {filtered.length === 0 && query && (
+            <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--accent)", cursor: "pointer" }}
+              onMouseDown={() => select(query)}>
+              + สร้างประเภทใหม่: "{query}"
+            </div>
+          )}
+          {filtered.map((opt) => (
+            <div key={opt} onMouseDown={() => select(opt)}
+              style={{ padding: "8px 12px", fontSize: 13, cursor: "pointer",
+                background: opt === value ? "var(--bg4)" : "transparent",
+                color: opt === value ? "var(--accent)" : "var(--text)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg4)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = opt === value ? "var(--bg4)" : "transparent")}>
+              {opt}
+            </div>
+          ))}
+          {filtered.length > 0 && query && !options.includes(query) && (
+            <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--accent)", cursor: "pointer",
+              borderTop: "1px solid var(--border)" }}
+              onMouseDown={() => select(query)}>
+              + สร้างประเภทใหม่: "{query}"
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ManagePage() {
-  const [items, setItems]   = useState<Accessory[]>([]);
+  const router = useRouter();
+  const [authed, setAuthed]   = useState(false);
+  const [items, setItems]     = useState<Accessory[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState("");
-  const [showModal, setShowModal]   = useState(false);
-  const [editId, setEditId]         = useState<string | null>(null);
-  const [form, setForm]             = useState<FormData>(emptyForm());
+  const [search, setSearch]   = useState("");
+  const [filterType, setFilterType]   = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [showModal, setShowModal]       = useState(false);
+  const [editId, setEditId]             = useState<string | null>(null);
+  const [form, setForm]                 = useState<FormData>(emptyForm());
+  const [formErrors, setFormErrors]     = useState<FormErrors>({});
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  // Auth gate
+  useEffect(() => {
+    if (sessionStorage.getItem("manage_auth") !== "1") {
+      router.replace("/login");
+    } else {
+      setAuthed(true);
+    }
+  }, [router]);
 
   useEffect(() => {
+    if (!authed) return;
     getAccessories().then(setItems).finally(() => setLoading(false));
-  }, []);
+  }, [authed]);
+
+  const logout = () => {
+    sessionStorage.removeItem("manage_auth");
+    router.push("/login");
+  };
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
@@ -31,6 +121,7 @@ export default function ManagePage() {
   const types   = Array.from(new Set(items.map((i) => i.type))).sort();
 
   const filtered = items.filter((i) => {
+    if (!showInactive && !i.is_active) return false;
     if (filterType && i.type !== filterType) return false;
     if (!search) return true;
     const q = search.toLowerCase();
@@ -39,21 +130,27 @@ export default function ManagePage() {
       i.acc_code.toLowerCase().includes(q) ||
       i.description.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
-      i.size.toLowerCase().includes(q)
+      i.size.toLowerCase().includes(q) ||
+      i.supplier.toLowerCase().includes(q)
     );
   });
 
-  const openAdd  = () => { setEditId(null); setForm(emptyForm()); setShowModal(true); };
+  const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
   const openEdit = (item: Accessory) => {
     setEditId(item.id);
-    setForm({ type:item.type, acc_code:item.acc_code, description:item.description,
-      row:item.row, color:item.color, size:item.size, quantity:item.quantity,
-      unit:item.unit, unit_cost:item.unit_cost, min_quantity:item.min_quantity });
+    setForm({
+      type: item.type, acc_code: item.acc_code, description: item.description,
+      row: item.row, color: item.color, size: item.size, quantity: item.quantity,
+      unit: item.unit, unit_cost: item.unit_cost, min_quantity: item.min_quantity,
+      supplier: item.supplier ?? "", is_active: item.is_active ?? true,
+    });
+    setFormErrors({});
     setShowModal(true);
   };
 
   const handleSave = async () => {
-    if (!form.type.trim()) { showToast("กรุณาระบุประเภทอุปกรณ์", "error"); return; }
+    const errors = validate(form);
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setSaving(true);
     try {
       if (editId) { await updateAccessory(editId, form); showToast("อัพเดตแล้ว ✓", "success"); }
@@ -75,14 +172,18 @@ export default function ManagePage() {
       setDeleteConfirm(null);
       showToast("ลบรายการแล้ว", "success");
     } catch (e: any) {
-      showToast(e.message ?? "ลบไม่ได้ — อาจมีรายการอ้างอิงอยู่", "error");
+      showToast(e.message ?? "ลบไม่ได้ — มีประวัติรายการอ้างอิงอยู่", "error");
     } finally {
       setSaving(false);
     }
   };
 
-  const f = (field: keyof FormData, val: string | number | null) =>
+  const f = (field: keyof FormData, val: string | number | boolean | null) => {
     setForm((prev) => ({ ...prev, [field]: val }));
+    setFormErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  if (!authed) return null;
 
   return (
     <div>
@@ -92,7 +193,14 @@ export default function ManagePage() {
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
+        <button onClick={() => setShowInactive(!showInactive)}
+          style={showInactive ? { borderColor:"var(--text3)", color:"var(--text2)" } : {}}>
+          {showInactive ? "ซ่อนรายการปิด" : "แสดงรายการปิด"}
+        </button>
         <button className="primary" onClick={openAdd}>+ เพิ่มรายการใหม่</button>
+        <button className="ghost" onClick={logout} style={{ marginLeft:"auto", color:"var(--text3)" }}>
+          ออกจากระบบ
+        </button>
         <span style={{ alignSelf:"center", fontSize:12, color:"var(--text3)" }}>{filtered.length} รายการ</span>
       </div>
 
@@ -104,26 +212,33 @@ export default function ManagePage() {
             <table>
               <thead>
                 <tr>
-                  <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
-                  <th className="num">สต็อค</th><th>หน่วย</th><th className="num">ราคา</th><th className="num">ขั้นต่ำ</th><th></th>
+                  <th>ประเภท</th><th>รหัส *</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
+                  <th>ซัพพลายเออร์</th><th className="num">สต็อค</th><th>หน่วย</th>
+                  <th className="num">ราคา</th><th className="num">ขั้นต่ำ</th><th>สถานะ</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={11} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={13} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {filtered.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45 }}>
                     <td><span className="tag">{item.type}</span></td>
-                    <td style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text2)" }}>{item.acc_code || "—"}</td>
-                    <td style={{ maxWidth:180 }}>{item.description || "—"}</td>
+                    <td style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:11}}>ไม่มีรหัส</span>}</td>
+                    <td style={{ maxWidth:160 }}>{item.description || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>
+                    <td style={{ fontSize:12, color:"var(--text2)" }}>{item.supplier || "—"}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{Number(item.quantity).toLocaleString()}</td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:12 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text3)" }}>{Number(item.min_quantity).toLocaleString()}</td>
+                    <td>
+                      {item.is_active
+                        ? <span style={{ fontSize:11, color:"var(--green)" }}>● ใช้งาน</span>
+                        : <span style={{ fontSize:11, color:"var(--red)" }}>○ เลิกผลิต</span>}
+                    </td>
                     <td>
                       <div style={{ display:"flex", gap:4 }}>
                         <button className="ghost" style={{ padding:"4px 8px", fontSize:12 }} onClick={() => openEdit(item)}>แก้ไข</button>
@@ -147,21 +262,36 @@ export default function ManagePage() {
               <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setShowModal(false)}>✕</button>
             </div>
             <div className="modal-body">
+
+              {/* type + acc_code — both required */}
               <div className="form-row form-grid form-grid-2">
                 <div>
-                  <label className="form-label">ชนิดอุปกรณ์ *</label>
-                  <input value={form.type} onChange={(e) => f("type", e.target.value)} placeholder="เช่น ซิป วีนัส" list="type-list" />
-                  <datalist id="type-list">{types.map((t) => <option key={t} value={t} />)}</datalist>
+                  <label className="form-label">ชนิดอุปกรณ์ <span style={{color:"var(--red)"}}>*</span></label>
+                  <TypeCombobox
+                    value={form.type}
+                    onChange={(v) => f("type", v)}
+                    options={types}
+                    hasError={!!formErrors.type}
+                  />
+                  {formErrors.type && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.type}</div>}
                 </div>
                 <div>
                   <label className="form-label">รหัสสินค้า</label>
-                  <input value={form.acc_code} onChange={(e) => f("acc_code", e.target.value)} placeholder="เช่น VC-32" />
+                  <input value={form.acc_code} onChange={(e) => f("acc_code", e.target.value)}
+                    placeholder="เช่น VC-32" />
                 </div>
               </div>
+
               <div className="form-row">
                 <label className="form-label">รายละเอียด</label>
                 <input value={form.description} onChange={(e) => f("description", e.target.value)} placeholder="รายละเอียดสินค้า" />
               </div>
+
+              <div className="form-row">
+                <label className="form-label">ซัพพลายเออร์ · Supplier</label>
+                <input value={form.supplier} onChange={(e) => f("supplier", e.target.value)} placeholder="เช่น YKK, Venus" />
+              </div>
+
               <div className="form-row form-grid form-grid-3">
                 <div>
                   <label className="form-label">สี</label>
@@ -173,31 +303,57 @@ export default function ManagePage() {
                 </div>
                 <div>
                   <label className="form-label">แถว (ด้าย)</label>
-                  <input type="number" value={form.row ?? ""} onChange={(e) => f("row", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" />
+                  <input type="number" value={form.row ?? ""}
+                    onChange={(e) => f("row", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" />
                 </div>
               </div>
+
               <div className="form-row form-grid form-grid-2">
                 <div>
-                  <label className="form-label">หน่วย</label>
+                  <label className="form-label">หน่วย <span style={{color:"var(--red)"}}>*</span></label>
                   <select value={form.unit} onChange={(e) => f("unit", e.target.value)}>
                     {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="form-label">ราคาซื้อ (฿)</label>
-                  <input type="number" step="0.01" value={form.unit_cost} onChange={(e) => f("unit_cost", parseFloat(e.target.value) || 0)} />
+                  <input type="number" step="0.0001" value={form.unit_cost}
+                    onChange={(e) => f("unit_cost", parseFloat(e.target.value) || 0)} />
                 </div>
               </div>
+
               <div className="form-row form-grid form-grid-2">
                 <div>
                   <label className="form-label">สต็อคเริ่มต้น</label>
-                  <input type="number" value={form.quantity} onChange={(e) => f("quantity", parseFloat(e.target.value) || 0)} />
+                  <input type="number" value={form.quantity}
+                    onChange={(e) => f("quantity", parseFloat(e.target.value) || 0)}
+                    style={formErrors.quantity ? {borderColor:"var(--red)"} : {}} />
+                  {formErrors.quantity && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.quantity}</div>}
                 </div>
                 <div>
                   <label className="form-label">สต็อคขั้นต่ำ (แจ้งเตือน)</label>
-                  <input type="number" value={form.min_quantity} onChange={(e) => f("min_quantity", parseFloat(e.target.value) || 0)} />
+                  <input type="number" value={form.min_quantity}
+                    onChange={(e) => f("min_quantity", parseFloat(e.target.value) || 0)} />
                 </div>
               </div>
+
+              {/* is_active toggle */}
+              <div className="form-row">
+                <label className="form-label">สถานะรายการ</label>
+                <div style={{ display:"flex", gap:8 }}>
+                  {[{val:true,label:"● ใช้งาน"},{val:false,label:"○ เลิกผลิต"}].map((opt) => (
+                    <button key={String(opt.val)} onClick={() => f("is_active", opt.val)}
+                      style={form.is_active === opt.val ? {
+                        borderColor: opt.val ? "var(--green)" : "var(--red)",
+                        color: opt.val ? "var(--green)" : "var(--red)",
+                        background: "var(--bg4)",
+                      } : {}}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
             </div>
             <div className="modal-footer">
               <button onClick={() => setShowModal(false)}>ยกเลิก</button>
@@ -220,9 +376,9 @@ export default function ManagePage() {
             <div className="modal-body">
               <p style={{ color:"var(--text2)" }}>ต้องการลบ <strong style={{ color:"var(--text)" }}>
                 {items.find((i) => i.id === deleteConfirm)?.type} {items.find((i) => i.id === deleteConfirm)?.description}
-              </strong> ออกจากระบบ?</p>
+              </strong>?</p>
               <p style={{ fontSize:12, color:"var(--text3)", marginTop:8 }}>
-                ไม่สามารถลบได้หากยังมีประวัติรายการอ้างอิงอยู่
+                ไม่สามารถลบได้หากมีประวัติรายการอ้างอิงอยู่ — ลองกดเลิกผลิตแทน
               </p>
             </div>
             <div className="modal-footer">
