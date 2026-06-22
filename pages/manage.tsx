@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addAccessory, updateAccessory, deleteAccessory, type Accessory } from "@/lib/store";
+import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, type Accessory, type Supplier } from "@/lib/store";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -77,10 +77,69 @@ function TypeCombobox({ value, onChange, options, hasError }: {
   );
 }
 
+function SupplierCombobox({ value, onChange, options }: {
+  value: string; onChange: (v: string) => void; options: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+  useEffect(() => { setQuery(value); }, [value]);
+  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase()));
+  const select = (opt: string) => { onChange(opt); setQuery(opt); setOpen(false); };
+  const clear = () => { onChange(""); setQuery(""); setOpen(false); };
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => { setOpen(false); setQuery(value); }, 150)}
+        placeholder="ค้นหาซัพพลายเออร์…"
+        autoComplete="off"
+      />
+      {value && (
+        <button type="button" onMouseDown={clear}
+          style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+            border: "none", background: "transparent", color: "var(--text3)", padding: "2px 6px", fontSize: 16 }}>
+          ✕
+        </button>
+      )}
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          background: "var(--bg3)", border: "1px solid var(--border2)",
+          borderRadius: "var(--r)", zIndex: 200, maxHeight: 220, overflowY: "auto",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}>
+          <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--text3)", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
+            onMouseDown={clear}>
+            — ไม่ระบุ —
+          </div>
+          {filtered.length === 0 && (
+            <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--text3)" }}>
+              ไม่พบซัพพลายเออร์
+            </div>
+          )}
+          {filtered.map((opt) => (
+            <div key={opt} onMouseDown={() => select(opt)}
+              style={{ padding: "8px 12px", fontSize: 13, cursor: "pointer",
+                background: opt === value ? "var(--bg4)" : "transparent",
+                color: opt === value ? "var(--accent)" : "var(--text)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg4)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = opt === value ? "var(--bg4)" : "transparent")}>
+              {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ManagePage() {
   const router = useRouter();
   const [authed, setAuthed]   = useState(false);
   const [items, setItems]     = useState<Accessory[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
   const [filterType, setFilterType]   = useState("");
@@ -104,7 +163,9 @@ export default function ManagePage() {
 
   useEffect(() => {
     if (!authed) return;
-    getAccessories().then(setItems).finally(() => setLoading(false));
+    Promise.all([getAccessories(), getSuppliers()])
+      .then(([accs, sups]) => { setItems(accs); setSuppliers(sups); })
+      .finally(() => setLoading(false));
   }, [authed]);
 
   const logout = () => {
@@ -289,7 +350,11 @@ export default function ManagePage() {
 
               <div className="form-row">
                 <label className="form-label">ซัพพลายเออร์ · Supplier</label>
-                <input value={form.supplier} onChange={(e) => f("supplier", e.target.value)} placeholder="เช่น YKK, Venus" />
+                <SupplierCombobox
+                  value={form.supplier}
+                  onChange={(v) => f("supplier", v)}
+                  options={suppliers.map((s) => s.supplier_name)}
+                />
               </div>
 
               <div className="form-row form-grid form-grid-3">

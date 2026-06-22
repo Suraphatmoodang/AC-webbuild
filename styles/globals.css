@@ -13,7 +13,7 @@
 
   --text: #0f172a;
   --text2: #475569;
-  --text3: #64748b;
+  --text3: #afb5c0;
 
   --accent: #2563eb;
   --accent2: #1d4ed8;
@@ -133,7 +133,7 @@ tr:hover td { background: var(--bg3); }
 .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
 
 .form-row { margin-bottom: 14px; }
-.form-label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.form-label { display: block; font-size: 15px; color: var(--text2); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
 .form-grid { display: grid; gap: 12px; }
 .form-grid-2 { grid-template-columns: 1fr 1fr; }
 .form-grid-3 { grid-template-columns: 1fr 1fr 1fr; }

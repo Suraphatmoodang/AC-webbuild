@@ -1,17 +1,31 @@
 import type { AppProps } from "next/app";
 import Link from "next/link";
 import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
 import "@/styles/globals.css";
 
 const NAV = [
-  { href: "/", label: "สต็อค", en: "Stock" },
-  { href: "/transactions", label: "บันทึกรายการ", en: "Transactions" },
-  { href: "/history", label: "ประวัติ", en: "History" },
-  { href: "/manage", label: "จัดการ", en: "Manage 🔒" },
+  { href: "/", label: "สต็อค", en: "Stock", auth: false },
+  { href: "/transactions", label: "บันทึกรายการ", en: "Transactions", auth: false },
+  { href: "/history", label: "ประวัติ", en: "History", auth: false },
+  { href: "/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
+  { href: "/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", auth: true },
 ];
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
+  const [authed, setAuthed] = useState(false);
+
+  // Re-check auth on every route change so the Suppliers link appears after login
+  useEffect(() => {
+    const check = () => setAuthed(sessionStorage.getItem("manage_auth") === "1");
+    check();
+    router.events.on("routeChangeComplete", check);
+    return () => router.events.off("routeChangeComplete", check);
+  }, [router.events]);
+
+  const visibleNav = NAV.filter((n) => !n.auth || authed);
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <header style={{
@@ -25,7 +39,7 @@ export default function App({ Component, pageProps }: AppProps) {
             <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>STOCK</span>
           </div>
           <nav style={{ display: "flex", gap: 2, flex: 1 }}>
-            {NAV.map((n) => {
+            {visibleNav.map((n) => {
               const active = router.pathname === n.href;
               return (
                 <Link key={n.href} href={n.href} style={{

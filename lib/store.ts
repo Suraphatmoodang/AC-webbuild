@@ -31,6 +31,25 @@ export type Transaction = {
   created_at: string;
 };
 
+export type Supplier = {
+  id: string;
+  supplier_code: string;
+  supplier_name: string;
+  contact_person: string;
+  contact_number: string;
+  contact_email: string;
+  line_id: string;
+  address: string;
+  city: string;
+  country: string;
+  postal_code: string;
+  lead_time: string;
+  payment_term: string;
+  tax_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // ── Accessories ──────────────────────────────────────────────
 
 export async function getAccessories(activeOnly = false): Promise<Accessory[]> {
@@ -137,4 +156,46 @@ export async function addTransaction(
   if (txErr) return { error: txErr.message };
 
   return { accessory: updatedAcc, transaction: tx };
+}
+
+// ── Suppliers ──────────────────────────────────────────────
+
+export async function getSuppliers(): Promise<Supplier[]> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select("*")
+    .order("supplier_name");
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function addSupplier(
+  input: Omit<Supplier, "id" | "created_at" | "updated_at">
+): Promise<Supplier> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .insert(input)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSupplier(
+  id: string,
+  input: Partial<Omit<Supplier, "id" | "created_at" | "updated_at">>
+): Promise<Supplier> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteSupplier(id: string): Promise<void> {
+  const { error } = await supabase.from("suppliers").delete().eq("id", id);
+  if (error) throw error;
 }
