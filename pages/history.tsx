@@ -8,6 +8,65 @@ const TX_LABELS: Record<string, { th: string; cls: string }> = {
   RETURN: { th: "คืนสต็อค", cls: "badge-return"  },
 };
 
+// Searchable dropdown. Options are { value, label } pairs.
+function Combobox({ value, onChange, options, placeholder, minWidth = 200 }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  minWidth?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
+  // When closed, show the selected label; when open/typing, show the query
+  const display = open ? query : selectedLabel;
+
+  const filtered = options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()));
+
+  const select = (v: string) => { onChange(v); setOpen(false); setQuery(""); };
+
+  return (
+    <div style={{ position: "relative", minWidth }}>
+      <input
+        value={display}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          background: "var(--bg3)", border: "1px solid var(--border2)",
+          borderRadius: "var(--r)", zIndex: 200, maxHeight: 260, overflowY: "auto",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}>
+          <div style={{ padding: "8px 12px", fontSize: 15, color: "var(--text3)", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
+            onMouseDown={() => select("")}>
+            {placeholder}
+          </div>
+          {filtered.length === 0 && (
+            <div style={{ padding: "8px 12px", fontSize: 15, color: "var(--text3)" }}>ไม่พบรายการ</div>
+          )}
+          {filtered.map((o) => (
+            <div key={o.value} onMouseDown={() => select(o.value)}
+              style={{ padding: "8px 12px", fontSize: 15, cursor: "pointer",
+                background: o.value === value ? "var(--bg4)" : "transparent",
+                color: o.value === value ? "var(--accent)" : "var(--text)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg4)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = o.value === value ? "var(--bg4)" : "transparent")}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HistoryPage() {
   const [txns, setTxns]   = useState<Transaction[]>([]);
   const [items, setItems] = useState<Accessory[]>([]);
@@ -26,6 +85,8 @@ export default function HistoryPage() {
   const switchToLedger = async (id: string) => {
     setSelectedItem(id);
     setView("ledger");
+    setSearch("");      // clear so the ledger always shows the full item history
+    setFilterType("");  // clear type filter so it can't hide the clicked item
     if (id) {
       setLoading(true);
       const rows = await getTransactionsByAccessory(id);
@@ -49,6 +110,8 @@ export default function HistoryPage() {
   const filteredTxns = txns.filter((t) => {
     const acc = accMap[t.accessory_id];
     if (!acc) return false;
+    // In ledger view, show every transaction for the item — no search/type filtering
+    if (view === "ledger") return true;
     if (filterType && acc.type !== filterType) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -68,21 +131,28 @@ export default function HistoryPage() {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: "1 1 200px" }} />
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width: "auto", minWidth: 160 }}>
-          <option value="">ทุกประเภท</option>
-          {types.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <select value={selectedItem}
-          onChange={(e) => e.target.value ? switchToLedger(e.target.value) : switchToAll()}
-          style={{ width: "auto", minWidth: 200 }}>
-          <option value="">ทุกรายการ</option>
-          {items.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.type} {i.description} {i.color} {i.size}
-            </option>
-          ))}
-        </select>
+        {view === "all" && (
+          <>
+            <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: "1 1 200px" }} />
+            <Combobox
+              value={filterType}
+              onChange={setFilterType}
+              options={types.map((t) => ({ value: t, label: t }))}
+              placeholder="ทุกประเภท"
+              minWidth={160}
+            />
+          </>
+        )}
+        <Combobox
+          value={selectedItem}
+          onChange={(v) => v ? switchToLedger(v) : switchToAll()}
+          options={items.map((i) => ({
+            value: i.id,
+            label: [i.type, i.description, i.color, i.size].filter(Boolean).join(" "),
+          }))}
+          placeholder="ทุกรายการ"
+          minWidth={220}
+        />
 
         <span style={{ alignSelf: "center", fontSize: 15, color: "var(--text3)" }}>{filteredTxns.length} รายการ</span>
       </div>
@@ -90,6 +160,11 @@ export default function HistoryPage() {
       {/* Ledger header */}
       {view === "ledger" && selectedAcc && (
         <div className="card" style={{ padding: "16px 20px", marginBottom: 16 }}>
+          <div style={{ marginBottom: 14 }}>
+            <button onClick={switchToAll} style={{ padding: "6px 14px", fontSize: 15 }}>
+              ← กลับไปดูทั้งหมด
+            </button>
+          </div>
           <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 14, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>ใบแสดงสต็อคคงเหลือ-เบิกใช้</div>
@@ -166,8 +241,8 @@ export default function HistoryPage() {
                 <thead>
                   <tr>
                     <th>วันที่</th><th>ประเภท</th><th>อุปกรณ์</th>
-                    <th className="num">จำนวน</th><th className="num">ก่อน</th><th className="num">หลัง</th>
-                    <th>อ้างอิง</th><th>หมายเหตุ</th><th>ผู้บันทึก</th>
+                    <th className="num">สต็อคเดิม</th><th className="num">รับเข้า</th><th className="num">เบิกใช้</th><th className="num">คงเหลือ</th>
+                    <th>เลขที่ใบสั่งซื้อ</th><th>ผู้บันทึก</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -180,7 +255,9 @@ export default function HistoryPage() {
                     const isIn  = t.transaction_type === "IN" || t.transaction_type === "RETURN";
                     const isAdj = t.transaction_type === "ADJUST";
                     return (
-                      <tr key={t.id}>
+                      <tr key={t.id} style={{ cursor: "pointer" }}
+                        onClick={() => switchToLedger(t.accessory_id)}
+                        title="คลิกเพื่อดูประวัติของรายการนี้">
                         <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text2)", whiteSpace: "nowrap" }}>
                           {new Date(t.created_at).toLocaleDateString("th-TH")}<br />
                           <span style={{ fontSize: 13, color: "var(--text3)" }}>
@@ -192,14 +269,20 @@ export default function HistoryPage() {
                           <div style={{ fontWeight: 500, fontSize: 15 }}>{acc?.type}</div>
                           <div style={{ fontSize: 14, color: "var(--text2)" }}>{acc?.description} {acc?.color} {acc?.size}</div>
                         </td>
-                        <td className="num" style={{ fontFamily: "var(--mono)", fontWeight: 500,
-                          color: isIn ? "var(--green)" : isAdj ? "var(--blue)" : "var(--red)" }}>
-                          {isIn ? "+" : isAdj ? "±" : "-"}{Math.abs(Number(t.quantity)).toLocaleString()}
-                        </td>
                         <td className="num" style={{ fontFamily: "var(--mono)", color: "var(--text3)", fontSize: 15 }}>{Number(t.quantity_before).toLocaleString()}</td>
-                        <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15 }}>{Number(t.quantity_after).toLocaleString()}</td>
-                        <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text3)" }}>{t.reference_no || "—"}</td>
-                        <td style={{ fontSize: 15, color: "var(--text2)" }}>{t.note || "—"}</td>
+                        <td className="num">
+                          {isIn ? <span style={{ color: "var(--green)", fontFamily: "var(--mono)", fontWeight: 500 }}>+{Math.abs(Number(t.quantity)).toLocaleString()}</span> : "—"}
+                        </td>
+                        <td className="num">
+                          {!isIn && !isAdj
+                            ? <span style={{ color: "var(--red)", fontFamily: "var(--mono)", fontWeight: 500 }}>{Math.abs(Number(t.quantity)).toLocaleString()}</span>
+                            : isAdj ? <span style={{ color: "var(--blue)", fontFamily: "var(--mono)" }}>ปรับ</span>
+                            : "—"}
+                        </td>
+                        <td className="num" style={{ fontFamily: "var(--mono)", fontWeight: 500 }}>{Number(t.quantity_after).toLocaleString()}</td>
+                        <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text3)" }}>
+                          {isIn && t.reference_no ? t.reference_no : "—"}
+                        </td>
                         <td style={{ fontSize: 15, color: "var(--text3)" }}>{t.created_by || "—"}</td>
                       </tr>
                     );
