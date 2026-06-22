@@ -14,6 +14,7 @@ export default function TransactionsPage() {
   const [items, setItems] = useState<Accessory[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selected, setSelected] = useState<Accessory | null>(null);
   const [txType, setTxType] = useState<TxType>("IN");
   const [qty, setQty] = useState("");
@@ -43,6 +44,27 @@ export default function TransactionsPage() {
       i.size.toLowerCase().includes(q)
     );
   });
+
+  const searching = search.trim().length > 0;
+
+  // Build the list of types with item counts (for the first drilldown step)
+  const typeGroups = (() => {
+    const map = new Map<string, { count: number; low: number }>();
+    for (const i of items) {
+      const g = map.get(i.type) ?? { count: 0, low: 0 };
+      g.count += 1;
+      if (Number(i.quantity) <= Number(i.min_quantity)) g.low += 1;
+      map.set(i.type, g);
+    }
+    return Array.from(map.entries())
+      .map(([type, g]) => ({ type, ...g }))
+      .sort((a, b) => a.type.localeCompare(b.type, "th"));
+  })();
+
+  // Variants belonging to the chosen type (for the second drilldown step)
+  const variantsOfType = selectedType
+    ? items.filter((i) => i.type === selectedType)
+    : [];
 
   const handleSubmit = async () => {
     if (!selected) return;
@@ -77,21 +99,35 @@ export default function TransactionsPage() {
         <div style={{ marginBottom: 12 }}>
           <input placeholder="ค้นหาอุปกรณ์ที่ต้องการบันทึก…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+
+        {/* Breadcrumb / back bar — only when drilled into a type and not searching */}
+        {!searching && selectedType && (
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => setSelectedType(null)} style={{ padding: "6px 12px", fontSize: 15 }}>
+              ← ประเภททั้งหมด
+            </button>
+            <span style={{ fontSize: 16, color: "var(--text2)" }}>
+              <span style={{ color: "var(--text3)" }}>ประเภท:</span> <strong style={{ color: "var(--accent)" }}>{selectedType}</strong>
+            </span>
+          </div>
+        )}
+
         <div className="card" style={{ overflow: "hidden" }}>
           {loading ? (
             <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>กำลังโหลด…</div>
-          ) : (
+          ) : searching ? (
+            /* ── SEARCH MODE: flat results across everything ── */
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
               <table>
                 <thead>
                   <tr>
-                    <th>ประเภท / รายละเอียด</th>
-                    <th>สี / ขนาด</th>
-                    <th className="num">สต็อคปัจจุบัน</th>
-                    <th></th>
+                    <th>ประเภท / รายละเอียด</th><th>สี / ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
+                  {filtered.length === 0 && (
+                    <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
+                  )}
                   {filtered.map((item) => {
                     const isSel = selected?.id === item.id;
                     const isLow = Number(item.quantity) <= Number(item.min_quantity);
@@ -106,6 +142,75 @@ export default function TransactionsPage() {
                           {item.color && <div>{item.color}</div>}
                           {item.size  && <div>{item.size}</div>}
                           {item.row   && <div style={{ color: "var(--text3)" }}>แถว {item.row}</div>}
+                        </td>
+                        <td className="num">
+                          <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
+                            {Number(item.quantity).toLocaleString()}
+                          </span>
+                          <span style={{ fontSize: 15, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
+                        </td>
+                        <td>{isSel && <span style={{ color: "var(--accent)" }}>▶</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : !selectedType ? (
+            /* ── STEP 1: pick a type ── */
+            <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>ประเภทอุปกรณ์</th><th className="num">จำนวนรายการ</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {typeGroups.length === 0 && (
+                    <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีอุปกรณ์</td></tr>
+                  )}
+                  {typeGroups.map((g) => (
+                    <tr key={g.type} style={{ cursor: "pointer" }}
+                      onClick={() => { setSelectedType(g.type); }}>
+                      <td style={{ fontWeight: 500, fontSize: 17 }}>{g.type}</td>
+                      <td className="num" style={{ color: "var(--text2)" }}>
+                        {g.count} รายการ
+                        {g.low > 0 && <span className="badge badge-low" style={{ marginLeft: 8 }}>ต่ำ {g.low}</span>}
+                      </td>
+                      <td><span style={{ color: "var(--text3)" }}>›</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            /* ── STEP 2: pick a variant (size / color) within the type ── */
+            <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>รายละเอียด</th><th>สี / ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {variantsOfType.length === 0 && (
+                    <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
+                  )}
+                  {variantsOfType.map((item) => {
+                    const isSel = selected?.id === item.id;
+                    const isLow = Number(item.quantity) <= Number(item.min_quantity);
+                    return (
+                      <tr key={item.id} style={{ cursor: "pointer", background: isSel ? "var(--bg4)" : undefined }}
+                        onClick={() => { setSelected(item); setQty(""); }}>
+                        <td>
+                          <div style={{ fontWeight: 500, fontSize: 16 }}>{item.description || "—"}</div>
+                          {item.acc_code && <div style={{ fontSize: 14, color: "var(--text3)" }}>{item.acc_code}</div>}
+                        </td>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>
+                          {item.color && <div>{item.color}</div>}
+                          {item.size  && <div>{item.size}</div>}
+                          {item.row   && <div style={{ color: "var(--text3)" }}>แถว {item.row}</div>}
+                          {!item.color && !item.size && !item.row && <span style={{ color: "var(--text3)" }}>—</span>}
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>

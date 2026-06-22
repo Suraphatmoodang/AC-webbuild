@@ -124,17 +124,12 @@ export default function HistoryPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>วันที่</th>
-                    <th className="num">รับเข้า</th>
-                    <th className="num">เบิกใช้</th>
-                    <th className="num">สต็อคคงเหลือ</th>
-                    <th>หมายเหตุ / เลขที่อ้างอิง</th>
-                    <th>ผู้บันทึก</th>
+                    <th>วันที่</th><th className="num">สต็อคเดิม</th><th className="num">รับเข้า</th><th className="num">เบิกใช้</th><th className="num">คงเหลือ</th><th>เลขที่ใบสั่งซื้อ</th><th>ผู้บันทึก</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredTxns.length === 0 && (
-                    <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ยังไม่มีรายการ</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ยังไม่มีรายการ</td></tr>
                   )}
                   {filteredTxns.map((t) => {
                     const isIn = t.transaction_type === "IN" || t.transaction_type === "RETURN";
@@ -144,6 +139,7 @@ export default function HistoryPage() {
                         <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text2)" }}>
                           {new Date(t.created_at).toLocaleDateString("th-TH")}
                         </td>
+                        <td className="num" style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>{Number(t.quantity_before).toLocaleString()}</td>
                         <td className="num">
                           {isIn ? <span style={{ color: "var(--green)", fontFamily: "var(--mono)", fontWeight: 500 }}>+{Math.abs(Number(t.quantity)).toLocaleString()}</span> : "—"}
                         </td>
@@ -155,8 +151,9 @@ export default function HistoryPage() {
                         </td>
                         <td className="num" style={{ fontFamily: "var(--mono)", fontWeight: 500 }}>{Number(t.quantity_after).toLocaleString()}</td>
                         <td style={{ color: "var(--text2)", fontSize: 15 }}>
-                          {t.reference_no && <span style={{ fontFamily: "var(--mono)", marginRight: 8, color: "var(--text3)" }}>{t.reference_no}</span>}
-                          {t.note}
+                          {isIn && t.reference_no
+                            ? <span style={{ fontFamily: "var(--mono)" }}>{t.reference_no}</span>
+                            : <span style={{ color: "var(--text3)" }}>—</span>}
                         </td>
                         <td style={{ fontSize: 15, color: "var(--text3)" }}>{t.created_by || "—"}</td>
                       </tr>
