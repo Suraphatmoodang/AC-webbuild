@@ -5,9 +5,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   const { username, password } = req.body;
 
+  // Trim leading/trailing spaces so accidental whitespace doesn't block login
+  const cleanUsername = typeof username === "string" ? username.trim() : "";
+  const cleanPassword = typeof password === "string" ? password.trim() : "";
+
   if (
-    username === process.env.MANAGE_USERNAME &&
-    password === process.env.MANAGE_PASSWORD
+    cleanUsername === (process.env.MANAGE_USERNAME ?? "").trim() &&
+    cleanPassword === (process.env.MANAGE_PASSWORD ?? "").trim()
   ) {
     return res.status(200).json({ ok: true });
   }

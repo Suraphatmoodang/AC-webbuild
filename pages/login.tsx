@@ -9,14 +9,16 @@ export default function LoginPage() {
   const [loading, setLoading]   = useState(false);
 
   const handleLogin = async () => {
-    if (!username || !password) { setError("กรุณากรอกชื่อผู้ใช้และรหัสผ่าน"); return; }
+    const u = username.trim();
+    const p = password.trim();
+    if (!u || !p) { setError("กรุณากรอกชื่อผู้ใช้และรหัสผ่าน"); return; }
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: u, password: p }),
       });
       if (res.ok) {
         sessionStorage.setItem("manage_auth", "1");
