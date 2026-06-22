@@ -43,9 +43,9 @@ export default function StockPage() {
           { label: "ประเภท",   en: "Types",       val: types.length, mono: false },
         ].map((s) => (
           <div key={s.label} className="card" style={{ padding: "14px 16px" }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>
-            <div style={{ fontSize: 22, fontWeight: 500, fontFamily: s.mono ? "var(--mono)" : "var(--font)", color: (s as any).warn ? "var(--accent)" : "var(--text)" }}>{s.val}</div>
-            <div style={{ fontSize: 10, color: "var(--text3)" }}>{s.en}</div>
+            <div style={{ fontSize: 15, color: "var(--text3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>
+            <div style={{ fontSize: 27, fontWeight: 500, fontFamily: s.mono ? "var(--mono)" : "var(--font)", color: (s as any).warn ? "var(--accent)" : "var(--text)" }}>{s.val}</div>
+            <div style={{ fontSize: 13, color: "var(--text3)" }}>{s.en}</div>
           </div>
         ))}
       </div>
@@ -62,7 +62,7 @@ export default function StockPage() {
         <button onClick={() => setShowLow(!showLow)} style={showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}}>
           ⚠ สต็อคต่ำ
         </button>
-        <span style={{ alignSelf: "center", fontSize: 12, color: "var(--text3)" }}>{filtered.length} รายการ</span>
+        <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)" }}>{filtered.length} รายการ</span>
       </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
@@ -74,7 +74,7 @@ export default function StockPage() {
               <thead>
                 <tr>
                   <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
-                  <th className="num">สต็อค</th><th>หน่วย</th><th className="num">ราคา/หน่วย</th><th className="num">มูลค่า</th><th>สถานะ</th>
+                  <th>สต็อค</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>สถานะ</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,7 +86,7 @@ export default function StockPage() {
                   return (
                     <tr key={item.id}>
                       <td><span className="tag">{item.type}</span></td>
-                      <td style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text2)" }}>{item.acc_code || "—"}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--text2)" }}>{item.acc_code || "—"}</td>
                       <td>{item.description || "—"}</td>
                       <td style={{ color: "var(--text2)" }}>{item.color || "—"}</td>
                       <td style={{ color: "var(--text2)" }}>{item.size || "—"}</td>
@@ -95,16 +95,16 @@ export default function StockPage() {
                         {Number(item.quantity).toLocaleString()}
                       </td>
                       <td style={{ color: "var(--text2)" }}>{item.unit}</td>
-                      <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>
+                      <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15 }}>
                         ฿{Number(item.unit_cost).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text2)" }}>
+                      <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text2)" }}>
                         ฿{(Number(item.quantity) * Number(item.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td>
                         {isLow
                           ? <span className="badge badge-low">ต่ำ</span>
-                          : <span style={{ fontSize: 11, color: "var(--green)" }}>✓ ปกติ</span>}
+                          : <span style={{ fontSize: 15, color: "var(--green)" }}>✓ ปกติ</span>}
                       </td>
                     </tr>
                   );

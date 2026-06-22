@@ -19,10 +19,10 @@ export default function App({ Component, pageProps }: AppProps) {
         background: "var(--bg)",
         position: "sticky", top: 0, zIndex: 50,
       }}>
-        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 32, height: 52 }}>
+        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 32, height: 70 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>ACC</span>
-            <span style={{ fontSize: 12, color: "var(--text3)", letterSpacing: "0.04em" }}>STOCK</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>ACC</span>
+            <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>STOCK</span>
           </div>
           <nav style={{ display: "flex", gap: 2, flex: 1 }}>
             {NAV.map((n) => {
@@ -31,7 +31,7 @@ export default function App({ Component, pageProps }: AppProps) {
                 <Link key={n.href} href={n.href} style={{
                   padding: "6px 14px",
                   borderRadius: "var(--r)",
-                  fontSize: 13,
+                  fontSize: 17,
                   color: active ? "var(--accent)" : "var(--text2)",
                   background: active ? "var(--bg3)" : "transparent",
                   transition: "all 0.15s",
@@ -41,12 +41,12 @@ export default function App({ Component, pageProps }: AppProps) {
                   lineHeight: 1.3,
                 }}>
                   <span>{n.label}</span>
-                  <span style={{ fontSize: 10, color: active ? "var(--accent2)" : "var(--text3)" }}>{n.en}</span>
+                  <span style={{ fontSize: 16, color: active ? "var(--accent2)" : "var(--text3)" }}>{n.en}</span>
                 </Link>
               );
             })}
           </nav>
-          <span style={{ fontSize: 11, color: "var(--text3)", fontFamily: "var(--mono)" }}>
+          <span style={{ fontSize: 16, color: "var(--text3)", fontFamily: "var(--mono)" }}>
             {new Date().toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" })}
           </span>
         </div>

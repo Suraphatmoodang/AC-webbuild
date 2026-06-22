@@ -84,7 +84,7 @@ export default function HistoryPage() {
           ))}
         </select>
 
-        <span style={{ alignSelf: "center", fontSize: 12, color: "var(--text3)" }}>{filteredTxns.length} รายการ</span>
+        <span style={{ alignSelf: "center", fontSize: 15, color: "var(--text3)" }}>{filteredTxns.length} รายการ</span>
       </div>
 
       {/* Ledger header */}
@@ -92,9 +92,9 @@ export default function HistoryPage() {
         <div className="card" style={{ padding: "16px 20px", marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
-              <div style={{ fontSize: 11, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>ใบแสดงสต็อคคงเหลือ-เบิกใช้</div>
-              <div style={{ fontWeight: 500, fontSize: 16 }}>{selectedAcc.type}</div>
-              <div style={{ fontSize: 13, color: "var(--text2)" }}>{selectedAcc.description}</div>
+              <div style={{ fontSize: 14, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>ใบแสดงสต็อคคงเหลือ-เบิกใช้</div>
+              <div style={{ fontWeight: 500, fontSize: 18 }}>{selectedAcc.type}</div>
+              <div style={{ fontSize: 16, color: "var(--text2)" }}>{selectedAcc.description}</div>
             </div>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               {[
@@ -106,8 +106,8 @@ export default function HistoryPage() {
                 { label: "สต็อคปัจจุบัน", val: `${Number(selectedAcc.quantity).toLocaleString()} ${selectedAcc.unit}` },
               ].map((f) => (
                 <div key={f.label} style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{f.label}</div>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 13 }}>{f.val}</div>
+                  <div style={{ fontSize: 15, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{f.label}</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 15 }}>{f.val}</div>
                 </div>
               ))}
             </div>
@@ -141,7 +141,7 @@ export default function HistoryPage() {
                     const isAdj = t.transaction_type === "ADJUST";
                     return (
                       <tr key={t.id}>
-                        <td style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text2)" }}>
+                        <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text2)" }}>
                           {new Date(t.created_at).toLocaleDateString("th-TH")}
                         </td>
                         <td className="num">
@@ -154,11 +154,11 @@ export default function HistoryPage() {
                             : "—"}
                         </td>
                         <td className="num" style={{ fontFamily: "var(--mono)", fontWeight: 500 }}>{Number(t.quantity_after).toLocaleString()}</td>
-                        <td style={{ color: "var(--text2)", fontSize: 12 }}>
+                        <td style={{ color: "var(--text2)", fontSize: 15 }}>
                           {t.reference_no && <span style={{ fontFamily: "var(--mono)", marginRight: 8, color: "var(--text3)" }}>{t.reference_no}</span>}
                           {t.note}
                         </td>
-                        <td style={{ fontSize: 12, color: "var(--text3)" }}>{t.created_by || "—"}</td>
+                        <td style={{ fontSize: 15, color: "var(--text3)" }}>{t.created_by || "—"}</td>
                       </tr>
                     );
                   })}
@@ -184,26 +184,26 @@ export default function HistoryPage() {
                     const isAdj = t.transaction_type === "ADJUST";
                     return (
                       <tr key={t.id}>
-                        <td style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap" }}>
+                        <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text2)", whiteSpace: "nowrap" }}>
                           {new Date(t.created_at).toLocaleDateString("th-TH")}<br />
-                          <span style={{ fontSize: 10, color: "var(--text3)" }}>
+                          <span style={{ fontSize: 13, color: "var(--text3)" }}>
                             {new Date(t.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
                           </span>
                         </td>
                         <td><span className={`badge ${label.cls}`}>{label.th}</span></td>
                         <td>
-                          <div style={{ fontWeight: 500, fontSize: 13 }}>{acc?.type}</div>
-                          <div style={{ fontSize: 12, color: "var(--text2)" }}>{acc?.description} {acc?.color} {acc?.size}</div>
+                          <div style={{ fontWeight: 500, fontSize: 15 }}>{acc?.type}</div>
+                          <div style={{ fontSize: 14, color: "var(--text2)" }}>{acc?.description} {acc?.color} {acc?.size}</div>
                         </td>
                         <td className="num" style={{ fontFamily: "var(--mono)", fontWeight: 500,
                           color: isIn ? "var(--green)" : isAdj ? "var(--blue)" : "var(--red)" }}>
                           {isIn ? "+" : isAdj ? "±" : "-"}{Math.abs(Number(t.quantity)).toLocaleString()}
                         </td>
-                        <td className="num" style={{ fontFamily: "var(--mono)", color: "var(--text3)", fontSize: 12 }}>{Number(t.quantity_before).toLocaleString()}</td>
-                        <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{Number(t.quantity_after).toLocaleString()}</td>
-                        <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text3)" }}>{t.reference_no || "—"}</td>
-                        <td style={{ fontSize: 12, color: "var(--text2)" }}>{t.note || "—"}</td>
-                        <td style={{ fontSize: 12, color: "var(--text3)" }}>{t.created_by || "—"}</td>
+                        <td className="num" style={{ fontFamily: "var(--mono)", color: "var(--text3)", fontSize: 15 }}>{Number(t.quantity_before).toLocaleString()}</td>
+                        <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15 }}>{Number(t.quantity_after).toLocaleString()}</td>
+                        <td style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text3)" }}>{t.reference_no || "—"}</td>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>{t.note || "—"}</td>
+                        <td style={{ fontSize: 15, color: "var(--text3)" }}>{t.created_by || "—"}</td>
                       </tr>
                     );
                   })}

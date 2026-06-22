@@ -212,9 +212,9 @@ export default function ManagePage() {
             <table>
               <thead>
                 <tr>
-                  <th>ประเภท</th><th>รหัส *</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
-                  <th>ซัพพลายเออร์</th><th className="num">สต็อค</th><th>หน่วย</th>
-                  <th className="num">ราคา</th><th className="num">ขั้นต่ำ</th><th>สถานะ</th><th></th>
+                  <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
+                  <th>ซัพพลายเออร์</th><th>สต็อค</th><th>หน่วย</th>
+                  <th>ราคา</th><th>ขั้นต่ำ</th><th>สถานะ</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -224,25 +224,25 @@ export default function ManagePage() {
                 {filtered.map((item) => (
                   <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45 }}>
                     <td><span className="tag">{item.type}</span></td>
-                    <td style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:11}}>ไม่มีรหัส</span>}</td>
+                    <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีรหัส</span>}</td>
                     <td style={{ maxWidth:160 }}>{item.description || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>
-                    <td style={{ fontSize:12, color:"var(--text2)" }}>{item.supplier || "—"}</td>
+                    <td style={{ fontSize:17, color:"var(--text2)" }}>{item.supplier || "—"}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{Number(item.quantity).toLocaleString()}</td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
-                    <td className="num" style={{ fontFamily:"var(--mono)", fontSize:12 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
-                    <td className="num" style={{ fontFamily:"var(--mono)", fontSize:12, color:"var(--text3)" }}>{Number(item.min_quantity).toLocaleString()}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontSize:15 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontSize:16, color:"var(--text3)" }}>{Number(item.min_quantity).toLocaleString()}</td>
                     <td>
                       {item.is_active
-                        ? <span style={{ fontSize:11, color:"var(--green)" }}>● ใช้งาน</span>
-                        : <span style={{ fontSize:11, color:"var(--red)" }}>○ เลิกผลิต</span>}
+                        ? <span style={{ fontSize:14, color:"var(--green)" }}>● ใช้งาน</span>
+                        : <span style={{ fontSize:14, color:"var(--red)" }}>○ เลิกผลิต</span>}
                     </td>
                     <td>
                       <div style={{ display:"flex", gap:4 }}>
-                        <button className="ghost" style={{ padding:"4px 8px", fontSize:12 }} onClick={() => openEdit(item)}>แก้ไข</button>
-                        <button className="ghost" style={{ padding:"4px 8px", fontSize:12, color:"var(--red)" }} onClick={() => setDeleteConfirm(item.id)}>ลบ</button>
+                        <button className="ghost" style={{ padding:"4px 8px", fontSize:15 }} onClick={() => openEdit(item)}>แก้ไข</button>
+                        <button className="ghost" style={{ padding:"4px 8px", fontSize:15, color:"var(--red)" }} onClick={() => setDeleteConfirm(item.id)}>ลบ</button>
                       </div>
                     </td>
                   </tr>
@@ -273,7 +273,7 @@ export default function ManagePage() {
                     options={types}
                     hasError={!!formErrors.type}
                   />
-                  {formErrors.type && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.type}</div>}
+                  {formErrors.type && <div style={{fontSize:14,color:"var(--red)",marginTop:3}}>{formErrors.type}</div>}
                 </div>
                 <div>
                   <label className="form-label">รหัสสินค้า</label>

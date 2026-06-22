@@ -99,10 +99,10 @@ export default function TransactionsPage() {
                       <tr key={item.id} style={{ cursor: "pointer", background: isSel ? "var(--bg4)" : undefined }}
                         onClick={() => { setSelected(item); setQty(""); }}>
                         <td>
-                          <div style={{ fontWeight: 500, fontSize: 13 }}>{item.type}</div>
-                          <div style={{ fontSize: 12, color: "var(--text2)" }}>{item.description}{item.acc_code ? ` · ${item.acc_code}` : ""}</div>
+                          <div style={{ fontWeight: 500, fontSize: 17 }}>{item.type}</div>
+                          <div style={{ fontSize: 14, color: "var(--text2)" }}>{item.description}{item.acc_code ? ` · ${item.acc_code}` : ""}</div>
                         </td>
-                        <td style={{ fontSize: 12, color: "var(--text2)" }}>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>
                           {item.color && <div>{item.color}</div>}
                           {item.size  && <div>{item.size}</div>}
                           {item.row   && <div style={{ color: "var(--text3)" }}>แถว {item.row}</div>}
@@ -111,7 +111,7 @@ export default function TransactionsPage() {
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
                             {Number(item.quantity).toLocaleString()}
                           </span>
-                          <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
+                          <span style={{ fontSize: 15, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
                         </td>
                         <td>{isSel && <span style={{ color: "var(--accent)" }}>▶</span>}</td>
                       </tr>
@@ -128,21 +128,21 @@ export default function TransactionsPage() {
       <div>
         <div className="card" style={{ padding: 20 }}>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+            <div style={{ fontSize: 15, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
               บันทึกรายการ · Transaction Entry
             </div>
             {selected ? (
               <div>
-                <div style={{ fontWeight: 500, fontSize: 15 }}>{selected.type}</div>
-                <div style={{ fontSize: 13, color: "var(--text2)" }}>{selected.description}</div>
+                <div style={{ fontWeight: 500, fontSize: 18 }}>{selected.type}</div>
+                <div style={{ fontSize: 15, color: "var(--text2)" }}>{selected.description}</div>
                 {(selected.color || selected.size) && (
-                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 2 }}>
+                  <div style={{ fontSize: 14, color: "var(--text3)", marginTop: 2 }}>
                     {[selected.color, selected.size, selected.acc_code].filter(Boolean).join(" · ")}
                   </div>
                 )}
               </div>
             ) : (
-              <div style={{ color: "var(--text3)", fontSize: 13 }}>← เลือกรายการจากตาราง</div>
+              <div style={{ color: "var(--text3)", fontSize: 16 }}>← เลือกรายการจากตาราง</div>
             )}
           </div>
 
@@ -156,7 +156,7 @@ export default function TransactionsPage() {
                   color: "var(--text)",
                 } : {}}>
                   <span style={{ fontWeight: 500 }}>{TX_LABELS[t].th}</span>
-                  <span style={{ fontSize: 10, color: "var(--text3)", display: "block" }}>{TX_LABELS[t].en}</span>
+                  <span style={{ fontSize: 15, color: "var(--text3)", display: "block" }}>{TX_LABELS[t].en}</span>
                 </button>
               ))}
             </div>
@@ -197,7 +197,7 @@ export default function TransactionsPage() {
           </div>
 
           {selected && (
-            <div style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: "12px 14px", marginBottom: 14, fontSize: 13 }}>
+            <div style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: "12px 14px", marginBottom: 14, fontSize: 15 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                 <span style={{ color: "var(--text2)" }}>ต้นทุนคงเหลือ</span>
                 <span style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>
@@ -211,7 +211,7 @@ export default function TransactionsPage() {
             </div>
           )}
 
-          <button className="primary" style={{ width: "100%", padding: "10px", fontSize: 14, opacity: (!selected || saving) ? 0.6 : 1 }}
+          <button className="primary" style={{ width: "100%", padding: "10px", fontSize: 16, opacity: (!selected || saving) ? 0.6 : 1 }}
             onClick={handleSubmit} disabled={!selected || saving}>
             {saving ? "กำลังบันทึก…" : "บันทึกรายการ"}
           </button>

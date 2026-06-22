@@ -36,11 +36,11 @@ export default function LoginPage() {
     <div style={{ minHeight: "80vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ width: "100%", maxWidth: 360 }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>
             ACC STOCK
           </div>
-          <div style={{ fontSize: 18, fontWeight: 500, marginTop: 8 }}>จัดการระบบ</div>
-          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>Manage — Login required</div>
+          <div style={{ fontSize: 23, fontWeight: 500, marginTop: 8 }}>จัดการระบบ</div>
+          <div style={{ fontSize: 17, color: "var(--text3)", marginTop: 4 }}>Manage — Login required</div>
         </div>
 
         <div className="card" style={{ padding: 24 }}>
@@ -67,14 +67,14 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 12, padding: "8px 10px", background: "var(--red2)", borderRadius: "var(--r)" }}>
+            <div style={{ color: "var(--red)", fontSize: 14, marginBottom: 12, padding: "8px 10px", background: "var(--red2)", borderRadius: "var(--r)" }}>
               {error}
             </div>
           )}
 
           <button
             className="primary"
-            style={{ width: "100%", padding: "10px", fontSize: 14, opacity: loading ? 0.6 : 1 }}
+            style={{ width: "100%", padding: "10px", fontSize: 16, opacity: loading ? 0.6 : 1 }}
             onClick={handleLogin}
             disabled={loading}
           >

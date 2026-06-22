@@ -46,8 +46,8 @@ input, select, textarea {
   border: 1px solid var(--border);
   color: var(--text);
   font-family: var(--font);
-  font-size: 13px;
-  padding: 7px 10px;
+  font-size: 15px;
+  padding: 7px 15px;
   border-radius: var(--r);
   outline: none;
   transition: border-color 0.15s;
@@ -59,7 +59,7 @@ select option { background: var(--bg3); }
 
 button {
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   border-radius: var(--r);
   border: 1px solid var(--border2);
@@ -86,7 +86,7 @@ button.ghost:hover { background: var(--bg3); color: var(--text); }
   align-items: center;
   padding: 2px 8px;
   border-radius: 2px;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 500;
   font-family: var(--mono);
   letter-spacing: 0.03em;
@@ -103,15 +103,15 @@ button.ghost:hover { background: var(--bg3); color: var(--text); }
 }
 
 .badge-low {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #ffeeee;
+  color: #df2929;
 }
 
-.tag { display: inline-block; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); font-size: 11px; padding: 1px 6px; border-radius: 2px; }
+.tag { display: inline-block; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); font-size: 15px; padding: 1px 6px; border-radius: 2px; }
 
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+th { text-align: left; font-size: 14px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 15px; border-bottom: 1px solid var(--border); font-size: 15px; vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--bg3); }
 .num { text-align: right; font-family: var(--mono); }
