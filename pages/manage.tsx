@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, type Accessory, type Supplier } from "@/lib/store";
+import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, type Accessory, type Supplier } from "@/lib/store";
+import { usePagination, PaginationBar } from "@/lib/pagination";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -9,7 +10,7 @@ type FormData = Omit<Accessory, "id" | "created_at" | "updated_at">;
 const emptyForm = (): FormData => ({
   type: "", acc_code: "", description: "", row: null,
   color: "", size: "", quantity: 0, unit: "เส้น",
-  unit_cost: 0, min_quantity: 10, supplier: "", is_active: true,
+  unit_cost: 0, min_quantity: 10, supplier_id: null, is_active: true,
 });
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
@@ -78,21 +79,22 @@ function TypeCombobox({ value, onChange, options, hasError }: {
 }
 
 function SupplierCombobox({ value, onChange, options }: {
-  value: string; onChange: (v: string) => void; options: string[];
+  value: string | null; onChange: (v: string | null) => void; options: { id: string; name: string }[];
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(value);
-  useEffect(() => { setQuery(value); }, [value]);
-  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase()));
-  const select = (opt: string) => { onChange(opt); setQuery(opt); setOpen(false); };
-  const clear = () => { onChange(""); setQuery(""); setOpen(false); };
+  const [query, setQuery] = useState("");
+  const selectedName = options.find((o) => o.id === value)?.name ?? "";
+  const display = open ? query : selectedName;
+  const filtered = options.filter((o) => o.name.toLowerCase().includes(query.toLowerCase()));
+  const select = (id: string) => { onChange(id); setOpen(false); setQuery(""); };
+  const clear = () => { onChange(null); setQuery(""); setOpen(false); };
   return (
     <div style={{ position: "relative" }}>
       <input
-        value={query}
+        value={display}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => { setOpen(false); setQuery(value); }, 150)}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder="ค้นหาซัพพลายเออร์…"
         autoComplete="off"
       />
@@ -120,13 +122,13 @@ function SupplierCombobox({ value, onChange, options }: {
             </div>
           )}
           {filtered.map((opt) => (
-            <div key={opt} onMouseDown={() => select(opt)}
+            <div key={opt.id} onMouseDown={() => select(opt.id)}
               style={{ padding: "8px 12px", fontSize: 13, cursor: "pointer",
-                background: opt === value ? "var(--bg4)" : "transparent",
-                color: opt === value ? "var(--accent)" : "var(--text)" }}
+                background: opt.id === value ? "var(--bg4)" : "transparent",
+                color: opt.id === value ? "var(--accent)" : "var(--text)" }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg4)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = opt === value ? "var(--bg4)" : "transparent")}>
-              {opt}
+              onMouseLeave={(e) => (e.currentTarget.style.background = opt.id === value ? "var(--bg4)" : "transparent")}>
+              {opt.name}
             </div>
           ))}
         </div>
@@ -149,6 +151,8 @@ export default function ManagePage() {
   const [form, setForm]                 = useState<FormData>(emptyForm());
   const [formErrors, setFormErrors]     = useState<FormErrors>({});
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkModal, setBulkModal] = useState<null | { blocked: string[] }>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -186,15 +190,65 @@ export default function ManagePage() {
     if (filterType && i.type !== filterType) return false;
     if (!search) return true;
     const q = search.toLowerCase();
+    const supName = (suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "").toLowerCase();
     return (
       i.type.toLowerCase().includes(q) ||
       i.acc_code.toLowerCase().includes(q) ||
       i.description.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
       i.size.toLowerCase().includes(q) ||
-      i.supplier.toLowerCase().includes(q)
+      supName.includes(q)
     );
   });
+
+  const pg = usePagination(filtered, `${search}|${filterType}|${showInactive}`);
+
+  // Page-scoped selection
+  const pageIds = pg.pageItems.map((i) => i.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const toggleRow = (id: string) => {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelected(next);
+  };
+  const togglePageAll = () => {
+    const next = new Set(selected);
+    if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    setSelected(next);
+  };
+
+  const runBulkDelete = async () => {
+    setSaving(true);
+    try {
+      const ids = Array.from(selected);
+      const { deleted, blocked } = await bulkDeleteAccessories(ids);
+      await refresh();
+      setSelected(new Set());
+      if (blocked.length > 0) {
+        // Keep the blocked ids so the modal can offer deactivation
+        setBulkModal({ blocked });
+        showToast(`ลบแล้ว ${deleted.length} · ลบไม่ได้ ${blocked.length} รายการ (มีประวัติธุรกรรม)`, "error");
+      } else {
+        showToast(`ลบ ${deleted.length} รายการแล้ว`, "success");
+      }
+    } catch (e: any) {
+      showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
+    } finally { setSaving(false); }
+  };
+
+  const runBulkDeactivate = async (ids: string[]) => {
+    setSaving(true);
+    try {
+      await bulkDeactivateAccessories(ids);
+      await refresh();
+      setBulkModal(null);
+      setSelected(new Set());
+      showToast(`ปิดใช้งาน ${ids.length} รายการแล้ว`, "success");
+    } catch (e: any) {
+      showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
+    } finally { setSaving(false); }
+  };
 
   const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
   const openEdit = (item: Accessory) => {
@@ -203,7 +257,7 @@ export default function ManagePage() {
       type: item.type, acc_code: item.acc_code, description: item.description,
       row: item.row, color: item.color, size: item.size, quantity: item.quantity,
       unit: item.unit, unit_cost: item.unit_cost, min_quantity: item.min_quantity,
-      supplier: item.supplier ?? "", is_active: item.is_active ?? true,
+      supplier_id: item.supplier_id ?? null, is_active: item.is_active ?? true,
     });
     setFormErrors({});
     setShowModal(true);
@@ -259,6 +313,11 @@ export default function ManagePage() {
           {showInactive ? "ซ่อนรายการปิด" : "แสดงรายการปิด"}
         </button>
         <button className="primary" onClick={openAdd}>+ เพิ่มรายการใหม่</button>
+        {selected.size > 0 && (
+          <button className="danger" onClick={runBulkDelete} disabled={saving}>
+            ลบที่เลือก ({selected.size})
+          </button>
+        )}
         <button className="ghost" onClick={logout} style={{ marginLeft:"auto", color:"var(--text3)" }}>
           ออกจากระบบ
         </button>
@@ -273,6 +332,9 @@ export default function ManagePage() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width:40, textAlign:"center" }}>
+                    <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width:"auto", cursor:"pointer" }} />
+                  </th>
                   <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
                   <th>ซัพพลายเออร์</th><th>สต็อค</th><th>หน่วย</th>
                   <th>ราคา</th><th>ขั้นต่ำ</th><th>สถานะ</th><th></th>
@@ -280,17 +342,20 @@ export default function ManagePage() {
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={13} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={14} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
                 )}
-                {filtered.map((item) => (
-                  <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45 }}>
+                {pg.pageItems.map((item) => (
+                  <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45, background: selected.has(item.id) ? "var(--bg4)" : undefined }}>
+                    <td style={{ textAlign:"center" }}>
+                      <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleRow(item.id)} style={{ width:"auto", cursor:"pointer" }} />
+                    </td>
                     <td><span className="tag">{item.type}</span></td>
                     <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีรหัส</span>}</td>
                     <td style={{ maxWidth:160 }}>{item.description || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>
-                    <td style={{ fontSize:17, color:"var(--text2)" }}>{item.supplier || "—"}</td>
+                    <td style={{ fontSize:17, color:"var(--text2)" }}>{suppliers.find((s) => s.id === item.supplier_id)?.supplier_name || "—"}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{Number(item.quantity).toLocaleString()}</td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:15 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
@@ -312,6 +377,7 @@ export default function ManagePage() {
             </table>
           </div>
         )}
+        <PaginationBar {...pg} />
       </div>
 
       {/* Add / Edit Modal */}
@@ -351,9 +417,9 @@ export default function ManagePage() {
               <div className="form-row">
                 <label className="form-label">ซัพพลายเออร์ · Supplier</label>
                 <SupplierCombobox
-                  value={form.supplier}
-                  onChange={(v) => f("supplier", v)}
-                  options={suppliers.map((s) => s.supplier_name)}
+                  value={form.supplier_id}
+                  onChange={(v) => f("supplier_id", v)}
+                  options={suppliers.map((s) => ({ id: s.id, name: s.supplier_name }))}
                 />
               </div>
 
@@ -450,6 +516,32 @@ export default function ManagePage() {
               <button onClick={() => setDeleteConfirm(null)}>ยกเลิก</button>
               <button className="danger" onClick={() => handleDelete(deleteConfirm)} disabled={saving}>
                 {saving ? "กำลังลบ…" : "ลบรายการ"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk delete blocked → offer deactivation */}
+      {bulkModal && (
+        <div className="modal-overlay" onClick={() => setBulkModal(null)}>
+          <div className="modal" style={{ maxWidth:440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight:500, color:"var(--accent)" }}>ลบบางรายการไม่ได้</div>
+              <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setBulkModal(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color:"var(--text2)" }}>
+                <strong style={{ color:"var(--text)" }}>{bulkModal.blocked.length} รายการ</strong> มีประวัติธุรกรรมอยู่ จึงลบไม่ได้เพื่อรักษาประวัติ
+              </p>
+              <p style={{ fontSize:14, color:"var(--text3)", marginTop:8 }}>
+                แนะนำให้ "ปิดใช้งาน" แทนการลบ — รายการจะถูกซ่อนจากการใช้งานปกติ แต่ประวัติยังคงอยู่
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setBulkModal(null)}>ไว้ภายหลัง</button>
+              <button className="primary" onClick={() => runBulkDeactivate(bulkModal.blocked)} disabled={saving}>
+                {saving ? "กำลังดำเนินการ…" : `ปิดใช้งาน ${bulkModal.blocked.length} รายการ`}
               </button>
             </div>
           </div>

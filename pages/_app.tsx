@@ -10,6 +10,7 @@ const NAV = [
   { href: "/history", label: "ประวัติ", en: "History", auth: false },
   { href: "/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
   { href: "/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", auth: true },
+  { href: "/import-review", label: "นำเข้า", en: "Import 🔒", auth: true },
 ];
 
 export default function App({ Component, pageProps }: AppProps) {

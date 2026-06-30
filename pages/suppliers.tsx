@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, type Supplier } from "@/lib/store";
+import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, bulkDeleteSuppliers, type Supplier } from "@/lib/store";
+import { usePagination, PaginationBar } from "@/lib/pagination";
 
 type FormData = Omit<Supplier, "id" | "created_at" | "updated_at">;
 
@@ -30,9 +31,12 @@ export default function SuppliersPage() {
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [viewItem, setViewItem]     = useState<Supplier | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
+  // Auth gate — same auth as manage page
   useEffect(() => {
     if (sessionStorage.getItem("manage_auth") !== "1") {
       router.replace("/login");
@@ -71,6 +75,35 @@ export default function SuppliersPage() {
       i.tax_id.toLowerCase().includes(q)
     );
   });
+
+  const pg = usePagination(filtered, search);
+
+  const pageIds = pg.pageItems.map((i) => i.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const toggleRow = (id: string) => {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelected(next);
+  };
+  const togglePageAll = () => {
+    const next = new Set(selected);
+    if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    setSelected(next);
+  };
+  const runBulkDelete = async () => {
+    setSaving(true);
+    try {
+      const ids = Array.from(selected);
+      await bulkDeleteSuppliers(ids);
+      await refresh();
+      setSelected(new Set());
+      setBulkConfirm(false);
+      showToast(`ลบ ${ids.length} รายการแล้ว`, "success");
+    } catch (e: any) {
+      showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
+    } finally { setSaving(false); }
+  };
 
   const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
   const openEdit = (item: Supplier) => {
@@ -129,6 +162,11 @@ export default function SuppliersPage() {
         <input placeholder="ค้นหาชื่อ ผู้ติดต่อ เบอร์ อีเมล…" value={search}
           onChange={(e) => setSearch(e.target.value)} style={{ flex:"1 1 240px" }} />
         <button className="primary" onClick={openAdd}>+ เพิ่มซัพพลายเออร์</button>
+        {selected.size > 0 && (
+          <button className="danger" onClick={() => setBulkConfirm(true)} disabled={saving}>
+            ลบที่เลือก ({selected.size})
+          </button>
+        )}
         <button className="ghost" onClick={logout} style={{ marginLeft:"auto", color:"var(--text3)" }}>
           ออกจากระบบ
         </button>
@@ -140,8 +178,9 @@ export default function SuppliersPage() {
           <div style={{ padding:48, textAlign:"center", color:"var(--text3)" }}>กำลังโหลด…</div>
         ) : (
           <div style={{ overflowX:"auto" }}>
-            <table style={{ tableLayout:"fixed", minWidth:1000 }}>
+            <table style={{ tableLayout:"fixed", minWidth:1040 }}>
               <colgroup>
+                <col style={{ width:"40px" }} />{/* checkbox */}
                 <col style={{ width:"19%" }} />{/* ชื่อบริษัท */}
                 <col style={{ width:"12%" }} />{/* ผู้ติดต่อ */}
                 <col style={{ width:"15%" }} />{/* เบอร์ติดต่อ */}
@@ -153,15 +192,21 @@ export default function SuppliersPage() {
               </colgroup>
               <thead>
                 <tr>
+                  <th style={{ textAlign:"center" }}>
+                    <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width:"auto", cursor:"pointer" }} />
+                  </th>
                   <th style={{ whiteSpace:"nowrap" }}>ชื่อบริษัท</th><th style={{ whiteSpace:"nowrap" }}>ผู้ติดต่อ</th><th style={{ whiteSpace:"nowrap" }}>เบอร์ติดต่อ</th><th style={{ whiteSpace:"nowrap" }}>อีเมล</th><th style={{ whiteSpace:"nowrap" }}>จังหวัด</th><th style={{ whiteSpace:"nowrap" }}>ระยะเวลาส่ง</th><th style={{ whiteSpace:"nowrap" }}>เทอมจ่าย</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={9} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
                 )}
-                {filtered.map((item) => (
-                  <tr key={item.id} style={{ cursor:"pointer" }} onClick={() => setViewItem(item)}>
+                {pg.pageItems.map((item) => (
+                  <tr key={item.id} style={{ cursor:"pointer", background: selected.has(item.id) ? "var(--bg4)" : undefined }} onClick={() => setViewItem(item)}>
+                    <td style={{ textAlign:"center" }} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleRow(item.id)} style={{ width:"auto", cursor:"pointer" }} />
+                    </td>
                     <td style={{ fontWeight:500, wordBreak:"break-word" }}>{item.supplier_name}</td>
                     <td style={{ color:"var(--text2)", wordBreak:"break-word" }}>{item.contact_person || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)", wordBreak:"break-word" }}>{item.contact_number || "—"}</td>
@@ -181,6 +226,7 @@ export default function SuppliersPage() {
             </table>
           </div>
         )}
+        <PaginationBar {...pg} />
       </div>
 
       {/* View detail modal */}
@@ -292,7 +338,7 @@ export default function SuppliersPage() {
                 </div>
                 <div>
                   <label className="form-label">เทอมจ่ายเงิน</label>
-                  <input value={form.payment_term} onChange={(e) => f("payment_term", e.target.value)} placeholder="เครดิต 30 วัน" />
+                  <input value={form.payment_term} onChange={(e) => f("payment_term", e.target.value)} placeholder="เครดิต30 วัน" />
                 </div>
                 <div>
                   <label className="form-label">เลขผู้เสียภาษี</label>
@@ -330,6 +376,32 @@ export default function SuppliersPage() {
               <button onClick={() => setDeleteConfirm(null)}>ยกเลิก</button>
               <button className="danger" onClick={() => handleDelete(deleteConfirm)} disabled={saving}>
                 {saving ? "กำลังลบ…" : "ลบรายการ"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk delete confirm */}
+      {bulkConfirm && (
+        <div className="modal-overlay" onClick={() => setBulkConfirm(false)}>
+          <div className="modal" style={{ maxWidth:420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight:500, color:"var(--red)" }}>ยืนยันการลบหลายรายการ</div>
+              <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setBulkConfirm(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color:"var(--text2)" }}>
+                ต้องการลบซัพพลายเออร์ <strong style={{ color:"var(--text)" }}>{selected.size} ราย</strong> ที่เลือกไว้?
+              </p>
+              <p style={{ fontSize:14, color:"var(--text3)", marginTop:8 }}>
+                อุปกรณ์ที่อ้างอิงซัพพลายเออร์เหล่านี้จะถูกตั้งค่าเป็น "ไม่ระบุซัพพลายเออร์" โดยอัตโนมัติ
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setBulkConfirm(false)}>ยกเลิก</button>
+              <button className="danger" onClick={runBulkDelete} disabled={saving}>
+                {saving ? "กำลังลบ…" : `ลบ ${selected.size} ราย`}
               </button>
             </div>
           </div>

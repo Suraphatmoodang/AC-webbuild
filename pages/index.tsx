@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAccessories, type Accessory } from "@/lib/store";
+import { usePagination, PaginationBar } from "@/lib/pagination";
 
 export default function StockPage() {
   const [items, setItems] = useState<Accessory[]>([]);
@@ -33,6 +34,8 @@ export default function StockPage() {
   const totalValue = items.reduce((s, i) => s + Number(i.quantity) * Number(i.unit_cost), 0);
   const lowCount = items.filter((i) => Number(i.quantity) <= Number(i.min_quantity)).length;
 
+  const pg = usePagination(filtered, `${search}|${filterType}|${showLow}`);
+
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 24 }}>
@@ -59,10 +62,14 @@ export default function StockPage() {
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <button onClick={() => setShowLow(!showLow)} style={showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}}>
+        <button onClick={() => setShowLow(!showLow)}
+          style={{
+            whiteSpace: "nowrap",
+            ...(showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}),
+          }}>
           ⚠ สต็อคต่ำ
         </button>
-        <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)" }}>{filtered.length} รายการ</span>
+        <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)", minWidth: 90, whiteSpace: "nowrap" }}>{filtered.length} รายการ</span>
       </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
@@ -81,7 +88,7 @@ export default function StockPage() {
                 {filtered.length === 0 && (
                   <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                 )}
-                {filtered.map((item) => {
+                {pg.pageItems.map((item) => {
                   const isLow = Number(item.quantity) <= Number(item.min_quantity);
                   return (
                     <tr key={item.id}>
@@ -113,6 +120,7 @@ export default function StockPage() {
             </table>
           </div>
         )}
+        <PaginationBar {...pg} />
       </div>
     </div>
   );

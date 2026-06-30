@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAccessories, getTransactions, getTransactionsByAccessory, type Accessory, type Transaction } from "@/lib/store";
+import { usePagination, PaginationBar } from "@/lib/pagination";
 
 const TX_LABELS: Record<string, { th: string; cls: string }> = {
   IN:     { th: "รับเข้า",   cls: "badge-in"     },
@@ -128,6 +129,9 @@ export default function HistoryPage() {
 
   const selectedAcc = selectedItem ? accMap[selectedItem] : null;
 
+  // Pagination only for the all-transactions view (ledger is per-item, small)
+  const pg = usePagination(filteredTxns, `${view}|${search}|${filterType}|${selectedItem}`);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
@@ -249,7 +253,7 @@ export default function HistoryPage() {
                   {filteredTxns.length === 0 && (
                     <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ยังไม่มีรายการ</td></tr>
                   )}
-                  {filteredTxns.map((t) => {
+                  {pg.pageItems.map((t) => {
                     const acc   = accMap[t.accessory_id];
                     const label = TX_LABELS[t.transaction_type];
                     const isIn  = t.transaction_type === "IN" || t.transaction_type === "RETURN";
@@ -292,6 +296,7 @@ export default function HistoryPage() {
             )}
           </div>
         )}
+        {view === "all" && <PaginationBar {...pg} />}
       </div>
     </div>
   );
