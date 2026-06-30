@@ -11,6 +11,7 @@ const NAV = [
   { href: "/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
   { href: "/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", auth: true },
   { href: "/import-review", label: "นำเข้า", en: "Import 🔒", auth: true },
+  { href: "/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", auth: true },
 ];
 
 export default function App({ Component, pageProps }: AppProps) {
