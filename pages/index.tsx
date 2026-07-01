@@ -76,7 +76,7 @@ export default function StockPage() {
         type: addForm.type.trim(), acc_code: addForm.acc_code.trim(), description: addForm.description.trim(),
         row: addForm.row ? parseInt(addForm.row) || null : null,
         color: addForm.color.trim(), size: addForm.size.trim(),
-        quantity: parseFloat(addForm.quantity) || 0, unit: addForm.unit.trim(),
+        quantity: parseFloat(addForm.quantity) || 0, min_quantity: 10, unit: addForm.unit.trim(),
         unit_cost: parseFloat(addForm.unit_cost) || 0,
         supplier_name: sup?.supplier_name ?? "", contact_person: sup?.contact_person ?? "",
         contact_number: sup?.contact_number ?? "", contact_email: sup?.contact_email ?? "",
@@ -191,24 +191,59 @@ export default function StockPage() {
               <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setViewItem(null)}>✕</button>
             </div>
             <div className="modal-body">
-              {[
-                ["รหัสสินค้า", viewItem.acc_code],
-                ["รายละเอียด", viewItem.description],
-                ["สี", viewItem.color],
-                ["ขนาด", viewItem.size],
-                ["แถว (ด้าย)", viewItem.row != null ? String(viewItem.row) : ""],
-                ["สต็อคคงเหลือ", `${Number(viewItem.quantity).toLocaleString()} ${viewItem.unit}`],
-                ["สต็อคขั้นต่ำ", `${Number(viewItem.min_quantity).toLocaleString()} ${viewItem.unit}`],
-                ["ราคาซื้อ", `฿${Number(viewItem.unit_cost).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
-                ["มูลค่าคงเหลือ", `฿${(Number(viewItem.quantity) * Number(viewItem.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
-                ["ซัพพลายเออร์", supName(viewItem.supplier_id)],
-                ["สถานะ", viewItem.is_active ? "ใช้งาน" : "เลิกผลิต"],
-              ].map(([label, val]) => (
-                <div key={label} style={{ display: "flex", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-                  <span style={{ width: 150, color: "var(--text3)", fontSize: 15, flexShrink: 0 }}>{label}</span>
-                  <span style={{ color: "var(--text)" }}>{val || "—"}</span>
-                </div>
-              ))}
+              {(() => {
+                const sup = suppliers.find((s) => s.id === viewItem.supplier_id) ?? null;
+                const rows: [string, string][] = [
+                  ["รหัสสินค้า", viewItem.acc_code],
+                  ["รายละเอียด", viewItem.description],
+                  ["สี", viewItem.color],
+                  ["ขนาด", viewItem.size],
+                  ["แถว (ด้าย)", viewItem.row != null ? String(viewItem.row) : ""],
+                  ["สต็อคคงเหลือ", `${Number(viewItem.quantity).toLocaleString()} ${viewItem.unit}`],
+                  ["สต็อคขั้นต่ำ", `${Number(viewItem.min_quantity).toLocaleString()} ${viewItem.unit}`],
+                  ["ราคาซื้อ", `฿${Number(viewItem.unit_cost).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
+                  ["มูลค่าคงเหลือ", `฿${(Number(viewItem.quantity) * Number(viewItem.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
+                  ["สถานะ", viewItem.is_active ? "ใช้งาน" : "เลิกผลิต"],
+                ];
+                const supRows: [string, string][] = sup ? [
+                  ["ชื่อบริษัท", sup.supplier_name],
+                  ["รหัสซัพพลายเออร์", sup.supplier_code],
+                  ["ผู้ติดต่อ", sup.contact_person],
+                  ["เบอร์ติดต่อ", sup.contact_number],
+                  ["อีเมล", sup.contact_email],
+                  ["Line ID", sup.line_id],
+                  ["ที่อยู่", sup.address],
+                  ["จังหวัด", sup.city],
+                  ["ประเทศ", sup.country],
+                  ["รหัสไปรษณีย์", sup.postal_code],
+                  ["ระยะเวลาส่ง", sup.lead_time],
+                  ["เทอมจ่ายเงิน", sup.payment_term],
+                  ["เลขผู้เสียภาษี", sup.tax_id],
+                ] : [];
+                return (
+                  <>
+                    {rows.map(([label, val]) => (
+                      <div key={label} style={{ display: "flex", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                        <span style={{ width: 150, color: "var(--text3)", fontSize: 15, flexShrink: 0 }}>{label}</span>
+                        <span style={{ color: "var(--text)", wordBreak: "break-word" }}>{val || "—"}</span>
+                      </div>
+                    ))}
+                    <div style={{ padding: "14px 0 4px", fontSize: 14, color: "var(--accent)", fontWeight: 500 }}>
+                      ซัพพลายเออร์
+                    </div>
+                    {sup ? (
+                      supRows.map(([label, val]) => (
+                        <div key={label} style={{ display: "flex", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                          <span style={{ width: 150, color: "var(--text3)", fontSize: 15, flexShrink: 0 }}>{label}</span>
+                          <span style={{ color: "var(--text)", wordBreak: "break-word" }}>{val || "—"}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ padding: "8px 0", color: "var(--text3)", fontSize: 15 }}>ไม่ได้ระบุซัพพลายเออร์</div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             <div className="modal-footer">
               {authed && (

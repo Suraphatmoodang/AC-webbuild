@@ -3,15 +3,17 @@ import { useState, useEffect } from "react";
 export const PAGE_SIZE = 100;
 
 // Slices a filtered array into pages and resets to page 0 when the filter changes.
-export function usePagination<T>(items: T[], resetKey: string) {
+// Optional `size` overrides the default page size (used e.g. by the import page).
+export function usePagination<T>(items: T[], resetKey: string, size: number = PAGE_SIZE) {
   const [page, setPage] = useState(0);
   useEffect(() => { setPage(0); }, [resetKey]);
+  useEffect(() => { setPage(0); }, [size]);
 
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(items.length / size));
   const safePage = Math.min(page, totalPages - 1);
-  const pageItems = items.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  const rangeStart = items.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeEnd = Math.min((safePage + 1) * PAGE_SIZE, items.length);
+  const pageItems = items.slice(safePage * size, safePage * size + size);
+  const rangeStart = items.length === 0 ? 0 : safePage * size + 1;
+  const rangeEnd = Math.min((safePage + 1) * size, items.length);
 
   return { page: safePage, setPage, totalPages, pageItems, rangeStart, rangeEnd, total: items.length };
 }

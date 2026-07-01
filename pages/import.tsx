@@ -4,22 +4,63 @@ import * as XLSX from "xlsx";
 import { createImportBatch } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
-// Maps the Thai column headers in the import sheet to our fields.
-// Column order (0-indexed) based on the provided template:
-// 0 ชนิดอุปกรณ์ 1 รหัสสินค้า 2 รายละเอียด 3 แถว 4 สี 5 ขนาด 6 สต็อค 7 หน่วย 8 ราคาซื้อ
-// 9 ชื่อบริษัทซัพ 10 ผู้ติดต่อ 11 เบอร์ติดต่อ 12 อีเมล 13 (blank) 14 ที่อยู่ 15 จังหวัด
-// 16 ประเทศ 17 รหัสไปรษณีย์ 18 ระยะเวลาส่ง 19 เทอมจ่ายเงิน 20 เลขผู้เสียภาษี
-
+// Maps sheet columns to fields by HEADER NAME (not position), so the importer
+// is robust to columns being reordered. Each field lists the accepted header
+// text(s); the first header that matches (after whitespace-normalizing) wins.
 type ParsedRow = {
   type: string; acc_code: string; description: string; row: number | null;
-  color: string; size: string; quantity: number; unit: string; unit_cost: number;
+  color: string; size: string; quantity: number; min_quantity: number; unit: string; unit_cost: number;
   supplier_name: string; contact_person: string; contact_number: string;
   contact_email: string; address: string; city: string; country: string;
   postal_code: string; lead_time: string; payment_term: string; tax_id: string;
 };
 
+// field → list of accepted header labels (normalized on both sides when matching)
+const HEADER_MAP: Record<string, string[]> = {
+  type:           ["ชนิดอุปกรณ์"],
+  acc_code:       ["รหัสสินค้า"],
+  description:    ["รายละเอียด"],
+  row:            ["แถว (เฉพาะด้าย)", "แถว"],
+  color:          ["สี"],
+  size:           ["ขนาด"],
+  quantity:       ["สต็อคคงเหลือ", "สต็อค"],
+  unit:           ["หน่วย"],
+  unit_cost:      ["ราคาซื้อ"],
+  min_quantity:   ["ขั้นต่ำ"],
+  supplier_name:  ["ชื่อบริษัทซัพ", "ชื่อบริษัทซัพพลายเออร์", "ซัพพลายเออร์"],
+  contact_person: ["ผู้ติดต่อ"],
+  contact_number: ["เบอร์ติดต่อ"],
+  contact_email:  ["อีเมล"],
+  address:        ["ที่อยู่"],
+  city:           ["จังหวัด"],
+  country:        ["ประเทศ"],
+  postal_code:    ["รหัสไปรษณีย์"],
+  lead_time:      ["ระยะเวลาส่ง(วัน)", "ระยะเวลาส่ง"],
+  payment_term:   ["เทอมจ่ายเงิน"],
+  tax_id:         ["เลขผู้เสียภาษี"],
+};
+
+const normHeader = (v: any) => String(v ?? "").trim().replace(/\s+/g, " ");
 const str = (v: any) => (v === undefined || v === null ? "" : String(v).trim());
 const num = (v: any) => { const n = parseFloat(String(v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+
+// Build a map of field → column index from the header row.
+function resolveColumns(headerRow: any[]): { index: Record<string, number>; missing: string[] } {
+  const normalized = headerRow.map(normHeader);
+  const index: Record<string, number> = {};
+  const missing: string[] = [];
+  for (const [field, labels] of Object.entries(HEADER_MAP)) {
+    const idx = normalized.findIndex((h) => labels.some((l) => normHeader(l) === h));
+    if (idx === -1) {
+      // Only type and unit are truly required; others can be absent
+      if (field === "type" || field === "unit") missing.push(labels[0]);
+      index[field] = -1;
+    } else {
+      index[field] = idx;
+    }
+  }
+  return { index, missing };
+}
 
 export default function ImportPage() {
   const router = useRouter();
@@ -48,18 +89,33 @@ export default function ImportPage() {
       const wb = XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const raw: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
-      // raw[0] is the header row — skip it
+      if (raw.length < 2) { showToast("ไฟล์ว่างเปล่าหรือไม่มีข้อมูล", "error"); setRows([]); return; }
+
+      // Resolve columns by header name (robust to reordering).
+      const { index, missing } = resolveColumns(raw[0]);
+      if (missing.length > 0) {
+        showToast("ไม่พบคอลัมน์ที่จำเป็น: " + missing.join(", "), "error");
+        setRows([]);
+        return;
+      }
+      const g = (r: any[], field: string) => {
+        const i = index[field];
+        return i >= 0 ? r[i] : undefined;
+      };
+
       const parsed: ParsedRow[] = raw.slice(1)
-        .filter((r) => str(r[0]) || str(r[2])) // must have a type or description
+        .filter((r) => str(g(r, "type")) || str(g(r, "description"))) // need type or description
         .map((r) => ({
-          type: str(r[0]), acc_code: str(r[1]), description: str(r[2]),
-          row: str(r[3]) ? parseInt(str(r[3])) || null : null,
-          color: str(r[4]), size: str(r[5]), quantity: num(r[6]),
-          unit: str(r[7]), unit_cost: num(r[8]),
-          supplier_name: str(r[9]), contact_person: str(r[10]), contact_number: str(r[11]),
-          contact_email: str(r[12]), address: str(r[14]), city: str(r[15]),
-          country: str(r[16]), postal_code: str(r[17]), lead_time: str(r[18]),
-          payment_term: str(r[19]), tax_id: str(r[20]),
+          type: str(g(r, "type")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
+          row: str(g(r, "row")) ? parseInt(str(g(r, "row"))) || null : null,
+          color: str(g(r, "color")), size: str(g(r, "size")),
+          quantity: num(g(r, "quantity")), min_quantity: num(g(r, "min_quantity")),
+          unit: str(g(r, "unit")), unit_cost: num(g(r, "unit_cost")),
+          supplier_name: str(g(r, "supplier_name")), contact_person: str(g(r, "contact_person")),
+          contact_number: str(g(r, "contact_number")), contact_email: str(g(r, "contact_email")),
+          address: str(g(r, "address")), city: str(g(r, "city")), country: str(g(r, "country")),
+          postal_code: str(g(r, "postal_code")), lead_time: str(g(r, "lead_time")),
+          payment_term: str(g(r, "payment_term")), tax_id: str(g(r, "tax_id")),
         }));
       setRows(parsed);
       showToast(`อ่านไฟล์สำเร็จ — ${parsed.length} รายการ`, "success");

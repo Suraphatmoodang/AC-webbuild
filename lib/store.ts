@@ -29,6 +29,7 @@ export type ImportRow = {
   color: string;
   size: string;
   quantity: number;
+  min_quantity: number;
   unit: string;
   unit_cost: number;
   supplier_name: string;
@@ -307,9 +308,13 @@ export async function deleteSupplier(id: string): Promise<void> {
 
 // Fields that define an "exact" import row for dedupe purposes.
 // Every one must match for a row to be considered a duplicate.
+// Fields that define an "exact" import row for dedupe purposes.
+// NOTE: quantity and min_quantity are intentionally EXCLUDED — the same item
+// with a different stock level is still the same item, so it should be flagged
+// as a duplicate rather than treated as a new entry.
 const IMPORT_MATCH_FIELDS = [
   "type", "acc_code", "description", "row", "color", "size",
-  "quantity", "unit", "unit_cost", "supplier_name", "contact_person",
+  "unit", "unit_cost", "supplier_name", "contact_person",
   "contact_number", "contact_email", "address", "city", "country",
   "postal_code", "lead_time", "payment_term", "tax_id",
 ] as const;
@@ -439,16 +444,17 @@ export async function rejectImports(ids: string[]): Promise<void> {
   }
 }
 
-// Approve a set of staging rows: ensure each supplier exists (create if new),
-// insert the accessory linked by supplier_id, then mark the staging row approved.
+// Approve staging rows. Each row may carry an optional `overwriteId`:
+//   - no overwriteId → insert as a NEW accessory (imported stock included)
+//   - overwriteId set → UPDATE that existing accessory, overwriting ALL data
+//     (admin-level: the import is treated as authoritative, stock included)
 export async function approveImports(
-  rows: ImportRow[]
+  rows: (ImportRow & { overwriteId?: string })[]
 ): Promise<{ approved: number; errors: string[] }> {
   const errors: string[] = [];
   let approved = 0;
 
   // Match supplier names against existing suppliers only — never auto-create.
-  // Unmatched suppliers leave the accessory's supplier blank, to be assigned later.
   const { data: existingSuppliers } = await supabase.from("suppliers").select("id, supplier_name");
   const supplierMap = new Map<string, string>(
     (existingSuppliers ?? []).map((s: any) => [normalizeForMatch(s.supplier_name), s.id])
@@ -458,26 +464,31 @@ export async function approveImports(
     try {
       let supplier_id: string | null = null;
       const sKey = normalizeForMatch(r.supplier_name);
-      if (sKey && supplierMap.has(sKey)) {
-        supplier_id = supplierMap.get(sKey)!;
-      }
-      // If no match, supplier_id stays null — assign later on the dedicated page.
+      if (sKey && supplierMap.has(sKey)) supplier_id = supplierMap.get(sKey)!;
 
-      const { error: accErr } = await supabase.from("accessories").insert({
+      const fields = {
         type: r.type,
         acc_code: r.acc_code,
         description: r.description,
         row: r.row,
         color: r.color,
         size: r.size,
-        quantity: r.quantity,
+        quantity: r.quantity,                              // stock IS imported
         unit: r.unit,
         unit_cost: r.unit_cost,
-        min_quantity: 10,
+        min_quantity: r.min_quantity > 0 ? r.min_quantity : 10,
         supplier_id,
         is_active: true,
-      });
-      if (accErr) throw accErr;
+      };
+
+      if (r.overwriteId) {
+        // Overwrite ALL data on the existing accessory
+        const { error: updErr } = await supabase.from("accessories").update(fields).eq("id", r.overwriteId);
+        if (updErr) throw updErr;
+      } else {
+        const { error: insErr } = await supabase.from("accessories").insert(fields);
+        if (insErr) throw insErr;
+      }
 
       const { error: markErr } = await supabase
         .from("accessory_imports")
