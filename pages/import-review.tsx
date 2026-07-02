@@ -17,6 +17,7 @@ export default function ImportReviewPage() {
   const [resolutions, setResolutions] = useState<Record<string, "new" | "old">>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [search, setSearch] = useState("");
   const [pageSize, setPageSize] = useState(100);
   const [detailRow, setDetailRow] = useState<ImportRow | null>(null);   // full-detail modal
@@ -112,10 +113,11 @@ export default function ImportReviewPage() {
     const plannedAdded = list.filter((x) => !x.overwriteId).length;
     const plannedOverwritten = list.filter((x) => x.overwriteId).length;
     setSaving(true);
+    setConfirmOverwrite(false);
+    setProgress({ done: 0, total: list.length });
     try {
-      const { approved, errors } = await approveImports(list);
+      const { approved, errors } = await approveImports(list, (done, total) => setProgress({ done, total }));
       const failed = list.length - approved;
-      setConfirmOverwrite(false);
       setCompletion({
         added: plannedAdded,
         overwritten: plannedOverwritten,
@@ -125,7 +127,7 @@ export default function ImportReviewPage() {
       load();
     } catch (e: any) {
       showToast("เกิดข้อผิดพลาด: " + (e.message ?? ""), "error");
-    } finally { setSaving(false); }
+    } finally { setSaving(false); setProgress(null); }
   };
 
   const handleApproveClick = () => {
@@ -429,6 +431,31 @@ export default function ImportReviewPage() {
             <div className="modal-footer">
               <button onClick={() => setCompletion(null)}>ปิด</button>
               <button className="primary" onClick={() => router.push("/")}>ไปที่หน้าสต็อค</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Write progress — approval writes rows one at a time, so this tracks it live */}
+      {progress && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight: 500, color: "var(--accent)" }}>กำลังบันทึกเข้าระบบ…</div>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--text2)", marginBottom: 8 }}>
+                <span>บันทึกแล้ว</span>
+                <span style={{ fontFamily: "var(--mono)" }}>
+                  {progress.done.toLocaleString()} / {progress.total.toLocaleString()}
+                  {progress.total > 0 && <span style={{ color: "var(--text3)" }}> ({Math.round((progress.done / progress.total) * 100)}%)</span>}
+                </span>
+              </div>
+              <div style={{ height: 10, background: "var(--bg3)", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%`,
+                  background: "var(--accent)", transition: "width 0.15s ease" }} />
+              </div>
+              <p style={{ fontSize: 13, color: "var(--text3)", marginTop: 10 }}>กรุณาอย่าปิดหน้านี้จนกว่าจะเสร็จ</p>
             </div>
           </div>
         </div>

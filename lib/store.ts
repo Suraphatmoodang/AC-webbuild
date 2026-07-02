@@ -13,9 +13,22 @@ export type Accessory = {
   unit_cost: number;
   min_quantity: number;
   supplier_id: string | null;   // FK → suppliers.id
+  valuation_method: "fifo" | "lifo";
   is_active: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type Lot = {
+  id: string;
+  accessory_id: string;
+  quantity_received: number;
+  quantity_remaining: number;
+  unit_cost: number;
+  effective_date: string;
+  created_at: string;
+  source: "IN" | "RETURN" | "MIGRATION" | "ADJUST";
+  note: string;
 };
 
 export type ImportRow = {
@@ -208,50 +221,77 @@ export async function getTransactionsByAccessory(accessory_id: string): Promise<
   return data ?? [];
 }
 
-export async function addTransaction(
-  accessory_id: string,
-  type: Transaction["transaction_type"],
-  qty: number,
-  reference_no: string,
-  note: string,
-  created_by: string
-): Promise<{ accessory: Accessory; transaction: Transaction } | { error: string }> {
-  const { data: acc, error: fetchErr } = await supabase
-    .from("accessories")
-    .select("*")
-    .eq("id", accessory_id)
-    .single();
+// Lot-aware transaction. Behavior by type:
+//  IN     → creates a new lot (qty + unit_cost), dated today
+//  RETURN → creates a new lot (qty + unit_cost) with chosen queue position
+//  OUT    → consumes lots FIFO/LIFO (or a specific lot), errors if insufficient
+//  ADJUST → sets a specific lot's remaining quantity to an exact value
+// Stock before/after on the transaction row are derived from lot totals.
+export async function addTransaction(opts: {
+  accessory_id: string;
+  type: Transaction["transaction_type"];
+  qty: number;                       // IN/OUT/RETURN: amount; ADJUST: target remaining for the lot
+  unit_cost?: number;                // IN/RETURN
+  lot_id?: string;                   // OUT (restrict to lot) / ADJUST (which lot)
+  return_position?: "front" | "back" | "date";  // RETURN
+  return_date?: string;              // RETURN when position = "date"
+  reference_no?: string;
+  note?: string;
+  created_by?: string;
+}): Promise<{ ok: true; before: number; after: number } | { error: string }> {
+  const { accessory_id, type, qty } = opts;
+  try {
+    const { data: acc, error: fetchErr } = await supabase
+      .from("accessories").select("*").eq("id", accessory_id).single();
+    if (fetchErr || !acc) return { error: "ไม่พบรายการ" };
+    const method: "fifo" | "lifo" = acc.valuation_method === "lifo" ? "lifo" : "fifo";
 
-  if (fetchErr || !acc) return { error: "ไม่พบรายการ" };
+    const lotsBefore = await getLots(accessory_id);
+    const before = stockFromLots(lotsBefore);
+    let txQty = qty;
 
-  const before = Number(acc.quantity);
-  let after = before;
-  let txQty = qty;
+    if (type === "IN" || type === "RETURN") {
+      // Determine effective_date for queue positioning
+      let effective = new Date().toISOString();
+      if (type === "RETURN") {
+        const sorted = [...lotsBefore].sort((a, b) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime());
+        if (opts.return_position === "front" && sorted.length > 0) {
+          effective = new Date(new Date(sorted[0].effective_date).getTime() - 1000).toISOString();
+        } else if (opts.return_position === "date" && opts.return_date) {
+          effective = new Date(opts.return_date).toISOString();
+        } // "back" or default → now (newest)
+      }
+      await createLot({
+        accessory_id, quantity: qty, unit_cost: opts.unit_cost ?? 0,
+        effective_date: effective, source: type === "RETURN" ? "RETURN" : "IN",
+        note: opts.note ?? "",
+      });
+      txQty = qty;
+    } else if (type === "OUT") {
+      await consumeStock(accessory_id, qty, method, opts.lot_id);
+      txQty = qty;
+    } else if (type === "ADJUST") {
+      if (!opts.lot_id) return { error: "กรุณาเลือกล็อตที่ต้องการปรับ" };
+      const target = lotsBefore.find((l) => l.id === opts.lot_id);
+      if (!target) return { error: "ไม่พบล็อต" };
+      txQty = qty - Number(target.quantity_remaining);
+      await adjustLot(opts.lot_id, qty);
+    }
 
-  if (type === "IN" || type === "RETURN") { after = before + qty; txQty = qty; }
-  else if (type === "OUT")  { after = before - qty; txQty = qty; }
-  else if (type === "ADJUST") { after = qty; txQty = qty - before; }
+    const lotsAfter = await getLots(accessory_id);
+    const after = stockFromLots(lotsAfter);
 
-  if (after < 0) return { error: "สต็อคไม่พอ" };
+    const { error: txErr } = await supabase
+      .from("accessory_transactions")
+      .insert({ accessory_id, transaction_type: type, quantity: txQty,
+        quantity_before: before, quantity_after: after,
+        reference_no: opts.reference_no ?? "", note: opts.note ?? "", created_by: opts.created_by ?? "" });
+    if (txErr) return { error: txErr.message };
 
-  const { data: updatedAcc, error: updateErr } = await supabase
-    .from("accessories")
-    .update({ quantity: after })
-    .eq("id", accessory_id)
-    .select()
-    .single();
-  if (updateErr) return { error: updateErr.message };
-
-  const { data: tx, error: txErr } = await supabase
-    .from("accessory_transactions")
-    .insert({ accessory_id, transaction_type: type, quantity: txQty,
-      quantity_before: before, quantity_after: after,
-      reference_no: reference_no ?? "", note: note ?? "", created_by: created_by ?? "" })
-    .select()
-    .single();
-  if (txErr) return { error: txErr.message };
-
-  return { accessory: updatedAcc, transaction: tx };
+    return { ok: true, before, after };
+  } catch (e: any) {
+    return { error: e.message ?? "เกิดข้อผิดพลาด" };
+  }
 }
 
 // ── Suppliers ──────────────────────────────────────────────
@@ -449,10 +489,12 @@ export async function rejectImports(ids: string[]): Promise<void> {
 //   - overwriteId set → UPDATE that existing accessory, overwriting ALL data
 //     (admin-level: the import is treated as authoritative, stock included)
 export async function approveImports(
-  rows: (ImportRow & { overwriteId?: string })[]
+  rows: (ImportRow & { overwriteId?: string })[],
+  onProgress?: (done: number, total: number) => void   // called after each row (writing is sequential/slow)
 ): Promise<{ approved: number; errors: string[] }> {
   const errors: string[] = [];
   let approved = 0;
+  let done = 0;
 
   // Match supplier names against existing suppliers only — never auto-create.
   const { data: existingSuppliers } = await supabase.from("suppliers").select("id, supplier_name");
@@ -473,21 +515,38 @@ export async function approveImports(
         row: r.row,
         color: r.color,
         size: r.size,
-        quantity: r.quantity,                              // stock IS imported
         unit: r.unit,
-        unit_cost: r.unit_cost,
+        unit_cost: r.unit_cost,        // reference price on the accessory (lots hold the real cost)
         min_quantity: r.min_quantity > 0 ? r.min_quantity : 10,
         supplier_id,
         is_active: true,
       };
 
       if (r.overwriteId) {
-        // Overwrite ALL data on the existing accessory
-        const { error: updErr } = await supabase.from("accessories").update(fields).eq("id", r.overwriteId);
+        // Overwrite master data on the existing accessory. Existing LOTS are left
+        // untouched — the item already has real stock history. Stock is corrected
+        // via the transactions/updater tools, not by re-importing.
+        const { error: updErr } = await supabase.from("accessories")
+          .update({ ...fields, quantity: r.quantity }).eq("id", r.overwriteId);
         if (updErr) throw updErr;
       } else {
-        const { error: insErr } = await supabase.from("accessories").insert(fields);
+        // New accessory: insert, then create its opening lot from the imported
+        // stock + price (dated today). This is how the migration seeds stock.
+        const { data: newAcc, error: insErr } = await supabase.from("accessories")
+          .insert({ ...fields, quantity: r.quantity }).select("id").single();
         if (insErr) throw insErr;
+
+        if (Number(r.quantity) > 0) {
+          const { error: lotErr } = await supabase.from("accessory_lots").insert({
+            accessory_id: newAcc.id,
+            quantity_received: r.quantity,
+            quantity_remaining: r.quantity,
+            unit_cost: r.unit_cost,
+            source: "MIGRATION",
+            note: "นำเข้าครั้งแรก",
+          });
+          if (lotErr) throw lotErr;
+        }
       }
 
       const { error: markErr } = await supabase
@@ -500,6 +559,7 @@ export async function approveImports(
     } catch (e: any) {
       errors.push(`${r.type} ${r.description}: ${e.message ?? "error"}`);
     }
+    onProgress?.(++done, rows.length);
   }
 
   return { approved, errors };
@@ -523,4 +583,215 @@ export async function getDuplicateMap(): Promise<Map<string, Accessory[]>> {
     if (data.length < PAGE) break;
   }
   return map;
+}
+
+// ── Lots (FIFO/LIFO inventory) ─────────────────────────────────
+
+// Fetch all lots, paged past the 1000-row cap. Optionally for one accessory.
+export async function getLots(accessoryId?: string): Promise<Lot[]> {
+  const all: Lot[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase.from("accessory_lots").select("*").order("effective_date").range(from, from + PAGE - 1);
+    if (accessoryId) q = q.eq("accessory_id", accessoryId);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return all;
+}
+
+// Build a map of accessory_id → its lots (sorted by effective_date ascending).
+export async function getLotMap(): Promise<Map<string, Lot[]>> {
+  const lots = await getLots();
+  const map = new Map<string, Lot[]>();
+  for (const l of lots) {
+    const arr = map.get(l.accessory_id) ?? [];
+    arr.push(l);
+    map.set(l.accessory_id, arr);
+  }
+  // each accessory's lots sorted oldest-effective first
+  Array.from(map.values()).forEach((arr) => arr.sort((a, b) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime()));
+  return map;
+}
+
+// Derive total stock and value for an accessory from its lots.
+export function stockFromLots(lots: Lot[]): number {
+  return lots.reduce((s, l) => s + Number(l.quantity_remaining), 0);
+}
+export function valueFromLots(lots: Lot[]): number {
+  return lots.reduce((s, l) => s + Number(l.quantity_remaining) * Number(l.unit_cost), 0);
+}
+
+// Create a new lot (used by IN, RETURN, MIGRATION).
+export async function createLot(input: {
+  accessory_id: string;
+  quantity: number;
+  unit_cost: number;
+  effective_date?: string;      // defaults to now
+  source?: Lot["source"];
+  note?: string;
+}): Promise<Lot> {
+  const eff = input.effective_date ?? new Date().toISOString();
+  const { data, error } = await supabase.from("accessory_lots").insert({
+    accessory_id: input.accessory_id,
+    quantity_received: input.quantity,
+    quantity_remaining: input.quantity,
+    unit_cost: input.unit_cost,
+    effective_date: eff,
+    source: input.source ?? "IN",
+    note: input.note ?? "",
+  }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Consume `qty` from an accessory's lots in FIFO or LIFO order.
+// Throws if insufficient stock. Optionally restrict to a single lot (lotId).
+// Returns the lots touched with amounts consumed (for optional cost tracking later).
+export async function consumeStock(
+  accessory_id: string,
+  qty: number,
+  method: "fifo" | "lifo",
+  lotId?: string
+): Promise<{ lot_id: string; consumed: number; unit_cost: number }[]> {
+  let lots = await getLots(accessory_id);
+  if (lotId) {
+    lots = lots.filter((l) => l.id === lotId);
+  } else {
+    lots.sort((a, b) => {
+      const t = new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime();
+      return method === "fifo" ? t : -t;
+    });
+  }
+
+  const available = lots.reduce((s, l) => s + Number(l.quantity_remaining), 0);
+  if (qty > available) {
+    throw new Error(`สต็อคไม่พอ: ต้องการ ${qty} มีเพียง ${available}`);
+  }
+
+  const touched: { lot_id: string; consumed: number; unit_cost: number }[] = [];
+  let remaining = qty;
+  for (const lot of lots) {
+    if (remaining <= 0) break;
+    const avail = Number(lot.quantity_remaining);
+    if (avail <= 0) continue;
+    const take = Math.min(avail, remaining);
+    const { error } = await supabase
+      .from("accessory_lots")
+      .update({ quantity_remaining: avail - take })
+      .eq("id", lot.id);
+    if (error) throw error;
+    touched.push({ lot_id: lot.id, consumed: take, unit_cost: Number(lot.unit_cost) });
+    remaining -= take;
+  }
+  return touched;
+}
+
+// Adjust a specific lot's remaining quantity to an exact value (for corrections).
+export async function adjustLot(lotId: string, newRemaining: number): Promise<void> {
+  if (newRemaining < 0) throw new Error("จำนวนต้องไม่ติดลบ");
+  const { error } = await supabase
+    .from("accessory_lots")
+    .update({ quantity_remaining: newRemaining })
+    .eq("id", lotId);
+  if (error) throw error;
+}
+
+// ── Stock Updater (bulk update existing accessories by matching) ─────
+
+export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier";
+
+// Build a code-aware match index over existing accessories.
+// Key: when acc_code present → type|code|description|color|size ; else → type|description|color|size
+// `size` is appended as a TIEBREAKER: it's blank on ~98% of rows (a no-op there,
+// identical to matching without it), but on the ~2% that carry a size it separates
+// otherwise-identical size-variants (e.g. the same zip in 5/6/7 นิ้ว) that would
+// otherwise collide as false "duplicates". Appending a field can only split groups,
+// never merge them, so it introduces no new collisions. This also makes the updater
+// consistent with the importer's dedupe (IMPORT_MATCH_FIELDS / getDuplicateMap),
+// both of which already include size.
+function accessoryMatchKey(a: { type: string; acc_code: string; description: string; color: string; size: string }): string {
+  const n = (v: string) => normalizeForMatch(v);
+  return a.acc_code.trim()
+    ? `C|${n(a.type)}|${n(a.acc_code)}|${n(a.description)}|${n(a.color)}|${n(a.size)}`
+    : `D|${n(a.type)}|${n(a.description)}|${n(a.color)}|${n(a.size)}`;
+}
+
+export async function buildAccessoryMatchIndex(): Promise<Map<string, Accessory[]>> {
+  const accs = await getAccessories();
+  const map = new Map<string, Accessory[]>();
+  for (const a of accs) {
+    const k = accessoryMatchKey(a);
+    const arr = map.get(k) ?? [];
+    arr.push(a);
+    map.set(k, arr);
+  }
+  return map;
+}
+
+export function matchKeyForRow(r: { type: string; acc_code: string; description: string; color: string; size: string }): string {
+  return accessoryMatchKey(r);
+}
+
+// Apply a bulk update to matched accessories. Each entry pairs an accessory id
+// with the sheet row's values. `fields` selects which columns to write (the "mode").
+// If "quantity" is included, the accessory's lots are REPLACED with one opening lot.
+export async function applyStockUpdates(
+  updates: {
+    accessory_id: string;
+    quantity?: number;
+    min_quantity?: number;
+    unit_cost?: number;      // sheet price (for the replacement lot / field)
+    description?: string;
+    supplier_id?: string | null;
+    current_unit_cost: number; // fallback price if sheet has none
+    sheet_has_price: boolean;
+  }[],
+  fields: UpdatableField[]
+): Promise<{ updated: number; errors: string[] }> {
+  const errors: string[] = [];
+  let updated = 0;
+
+  for (const u of updates) {
+    try {
+      // 1. Build the master-field patch from selected columns
+      const patch: Record<string, any> = {};
+      if (fields.includes("min_quantity") && u.min_quantity !== undefined) patch.min_quantity = u.min_quantity;
+      if (fields.includes("unit_cost") && u.unit_cost !== undefined) patch.unit_cost = u.unit_cost;
+      if (fields.includes("description") && u.description !== undefined) patch.description = u.description;
+      if (fields.includes("supplier") && u.supplier_id !== undefined) patch.supplier_id = u.supplier_id;
+      if (Object.keys(patch).length > 0) {
+        const { error } = await supabase.from("accessories").update(patch).eq("id", u.accessory_id);
+        if (error) throw error;
+      }
+
+      // 2. If stock is being updated → wipe existing lots, create one opening lot
+      if (fields.includes("quantity") && u.quantity !== undefined) {
+        const { error: delErr } = await supabase.from("accessory_lots").delete().eq("accessory_id", u.accessory_id);
+        if (delErr) throw delErr;
+        if (u.quantity > 0) {
+          const lotPrice = u.sheet_has_price ? (u.unit_cost ?? 0) : u.current_unit_cost;
+          const { error: lotErr } = await supabase.from("accessory_lots").insert({
+            accessory_id: u.accessory_id,
+            quantity_received: u.quantity,
+            quantity_remaining: u.quantity,
+            unit_cost: lotPrice,
+            source: "MIGRATION",
+            note: "อัปเดตสต็อค",
+          });
+          if (lotErr) throw lotErr;
+        }
+        // keep accessories.quantity mirror roughly in sync (not authoritative)
+        await supabase.from("accessories").update({ quantity: u.quantity }).eq("id", u.accessory_id);
+      }
+
+      updated += 1;
+    } catch (e: any) {
+      errors.push(`${u.accessory_id}: ${e.message ?? "error"}`);
+    }
+  }
+  return { updated, errors };
 }

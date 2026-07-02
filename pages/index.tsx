@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, getSuppliers, stageAccessory, type Accessory, type Supplier, type ImportRow } from "@/lib/store";
+import { getAccessories, getSuppliers, stageAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Supplier, type ImportRow, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
@@ -19,6 +19,7 @@ export default function StockPage() {
   const router = useRouter();
   const [items, setItems] = useState<Accessory[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
@@ -33,8 +34,8 @@ export default function StockPage() {
 
   useEffect(() => {
     setAuthed(typeof window !== "undefined" && sessionStorage.getItem("manage_auth") === "1");
-    Promise.all([getAccessories(), getSuppliers()])
-      .then(([accs, sups]) => { setItems(accs); setSuppliers(sups); })
+    Promise.all([getAccessories(), getSuppliers(), getLotMap()])
+      .then(([accs, sups, lm]) => { setItems(accs); setSuppliers(sups); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -44,10 +45,13 @@ export default function StockPage() {
   };
 
   const supName = (id: string | null) => suppliers.find((s) => s.id === id)?.supplier_name ?? "—";
+  const stockOf = (id: string) => stockFromLots(lotMap.get(id) ?? []);
+  const valueOf = (id: string) => valueFromLots(lotMap.get(id) ?? []);
+  const lotsOf = (id: string) => (lotMap.get(id) ?? []).filter((l) => Number(l.quantity_remaining) > 0);
   const types = Array.from(new Set(items.map((i) => i.type))).sort();
 
   const filtered = items.filter((i) => {
-    if (showLow && i.quantity > i.min_quantity) return false;
+    if (showLow && stockOf(i.id) > i.min_quantity) return false;
     if (filterType && i.type !== filterType) return false;
     if (!search) return true;
     const q = search.toLowerCase();
@@ -60,8 +64,8 @@ export default function StockPage() {
     );
   });
 
-  const totalValue = items.reduce((s, i) => s + Number(i.quantity) * Number(i.unit_cost), 0);
-  const lowCount = items.filter((i) => Number(i.quantity) <= Number(i.min_quantity)).length;
+  const totalValue = items.reduce((s, i) => s + valueOf(i.id), 0);
+  const lowCount = items.filter((i) => stockOf(i.id) <= Number(i.min_quantity)).length;
   const pg = usePagination(filtered, `${search}|${filterType}|${showLow}`);
 
   const af = (field: keyof AddForm, val: string) => { setAddForm((p) => ({ ...p, [field]: val })); setAddErr(""); };
@@ -145,7 +149,10 @@ export default function StockPage() {
                   <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {pg.pageItems.map((item) => {
-                  const isLow = Number(item.quantity) <= Number(item.min_quantity);
+                  const stock = stockOf(item.id);
+                  const value = valueOf(item.id);
+                  const avgCost = stock > 0 ? value / stock : 0;
+                  const isLow = stock <= Number(item.min_quantity);
                   return (
                     <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => setViewItem(item)}>
                       <td><span className="tag">{item.type}</span></td>
@@ -155,14 +162,14 @@ export default function StockPage() {
                       <td style={{ color: "var(--text2)" }}>{item.size || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>{item.row ?? "—"}</td>
                       <td className="num" style={{ color: isLow ? "var(--accent)" : "var(--text)", fontWeight: isLow ? 500 : 400 }}>
-                        {Number(item.quantity).toLocaleString()}
+                        {stock.toLocaleString()}
                       </td>
                       <td style={{ color: "var(--text2)" }}>{item.unit}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15 }}>
-                        ฿{Number(item.unit_cost).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ฿{avgCost.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--text2)" }}>
-                        ฿{(Number(item.quantity) * Number(item.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ฿{value.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td>
                         {isLow
@@ -193,16 +200,21 @@ export default function StockPage() {
             <div className="modal-body">
               {(() => {
                 const sup = suppliers.find((s) => s.id === viewItem.supplier_id) ?? null;
+                const vStock = stockOf(viewItem.id);
+                const vValue = valueOf(viewItem.id);
+                const vAvg = vStock > 0 ? vValue / vStock : 0;
+                const vLots = lotsOf(viewItem.id);
                 const rows: [string, string][] = [
                   ["รหัสสินค้า", viewItem.acc_code],
                   ["รายละเอียด", viewItem.description],
                   ["สี", viewItem.color],
                   ["ขนาด", viewItem.size],
                   ["แถว (ด้าย)", viewItem.row != null ? String(viewItem.row) : ""],
-                  ["สต็อคคงเหลือ", `${Number(viewItem.quantity).toLocaleString()} ${viewItem.unit}`],
+                  ["สต็อคคงเหลือ", `${vStock.toLocaleString()} ${viewItem.unit}`],
                   ["สต็อคขั้นต่ำ", `${Number(viewItem.min_quantity).toLocaleString()} ${viewItem.unit}`],
-                  ["ราคาซื้อ", `฿${Number(viewItem.unit_cost).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
-                  ["มูลค่าคงเหลือ", `฿${(Number(viewItem.quantity) * Number(viewItem.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
+                  ["ราคาซื้อเฉลี่ย", `฿${vAvg.toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
+                  ["มูลค่าคงเหลือ", `฿${vValue.toLocaleString("th-TH", { minimumFractionDigits: 2 })}`],
+                  ["วิธีคิดต้นทุน", viewItem.valuation_method === "lifo" ? "LIFO" : "FIFO"],
                   ["สถานะ", viewItem.is_active ? "ใช้งาน" : "เลิกผลิต"],
                 ];
                 const supRows: [string, string][] = sup ? [
@@ -228,6 +240,29 @@ export default function StockPage() {
                         <span style={{ color: "var(--text)", wordBreak: "break-word" }}>{val || "—"}</span>
                       </div>
                     ))}
+
+                    {/* Per-lot breakdown */}
+                    <div style={{ padding: "14px 0 4px", fontSize: 14, color: "var(--accent)", fontWeight: 500 }}>
+                      ล็อตสต็อค ({vLots.length})
+                    </div>
+                    {vLots.length === 0 ? (
+                      <div style={{ padding: "8px 0", color: "var(--text3)", fontSize: 15 }}>ไม่มีล็อตคงเหลือ</div>
+                    ) : (
+                      <div style={{ marginBottom: 6 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, fontSize: 12, color: "var(--text3)", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+                          <span>วันที่</span><span className="num">คงเหลือ</span><span className="num">ราคา/หน่วย</span><span className="num">มูลค่า</span>
+                        </div>
+                        {vLots.map((l) => (
+                          <div key={l.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, fontSize: 13, padding: "5px 0", borderBottom: "1px solid var(--border)" }}>
+                            <span style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>{new Date(l.effective_date).toLocaleDateString("th-TH")}</span>
+                            <span className="num" style={{ fontFamily: "var(--mono)" }}>{Number(l.quantity_remaining).toLocaleString()}</span>
+                            <span className="num" style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>฿{Number(l.unit_cost).toFixed(2)}</span>
+                            <span className="num" style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>฿{(Number(l.quantity_remaining) * Number(l.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div style={{ padding: "14px 0 4px", fontSize: 14, color: "var(--accent)", fontWeight: 500 }}>
                       ซัพพลายเออร์
                     </div>

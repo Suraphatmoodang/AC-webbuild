@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAccessories, getTransactions, getTransactionsByAccessory, type Accessory, type Transaction } from "@/lib/store";
+import { getAccessories, getTransactions, getTransactionsByAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Transaction, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 const TX_LABELS: Record<string, { th: string; cls: string }> = {
@@ -71,6 +71,7 @@ function Combobox({ value, onChange, options, placeholder, minWidth = 200 }: {
 export default function HistoryPage() {
   const [txns, setTxns]   = useState<Transaction[]>([]);
   const [items, setItems] = useState<Accessory[]>([]);
+  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch]         = useState("");
   const [filterType, setFilterType] = useState("");
@@ -78,8 +79,8 @@ export default function HistoryPage() {
   const [view, setView] = useState<"all" | "ledger">("all");
 
   useEffect(() => {
-    Promise.all([getAccessories(), getTransactions()])
-      .then(([accs, txs]) => { setItems(accs); setTxns(txs); })
+    Promise.all([getAccessories(), getTransactions(), getLotMap()])
+      .then(([accs, txs, lm]) => { setItems(accs); setTxns(txs); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -181,8 +182,8 @@ export default function HistoryPage() {
                 { label: "สี",           val: selectedAcc.color    || "—" },
                 { label: "ขนาด",         val: selectedAcc.size     || "—" },
                 { label: "หน่วย",        val: selectedAcc.unit },
-                { label: "ราคาซื้อ",     val: `฿${Number(selectedAcc.unit_cost).toFixed(2)}` },
-                { label: "สต็อคปัจจุบัน", val: `${Number(selectedAcc.quantity).toLocaleString()} ${selectedAcc.unit}` },
+                { label: "ราคาเฉลี่ย",   val: (() => { const s = stockFromLots(lotMap.get(selectedAcc.id) ?? []); const v = valueFromLots(lotMap.get(selectedAcc.id) ?? []); return `฿${(s > 0 ? v / s : 0).toFixed(2)}`; })() },
+                { label: "สต็อคปัจจุบัน", val: `${stockFromLots(lotMap.get(selectedAcc.id) ?? []).toLocaleString()} ${selectedAcc.unit}` },
               ].map((f) => (
                 <div key={f.label} style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 15, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{f.label}</div>
@@ -245,7 +246,7 @@ export default function HistoryPage() {
                 <thead>
                   <tr>
                     <th>วันที่</th><th>ประเภท</th><th>อุปกรณ์</th>
-                    <th className="num">สต็อคเดิม</th><th className="num">รับเข้า</th><th className="num">เบิกใช้</th><th className="num">คงเหลือ</th>
+                    <th>สต็อคเดิม</th><th>รับเข้า</th><th>เบิกใช้</th><th>คงเหลือ</th>
                     <th>เลขที่ใบสั่งซื้อ</th><th>ผู้บันทึก</th>
                   </tr>
                 </thead>

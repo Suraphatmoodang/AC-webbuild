@@ -50,11 +50,6 @@ export default function SuppliersPage() {
     getSuppliers().then(setItems).finally(() => setLoading(false));
   }, [authed]);
 
-  const logout = () => {
-    sessionStorage.removeItem("manage_auth");
-    router.push("/login");
-  };
-
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -167,10 +162,7 @@ export default function SuppliersPage() {
             ลบที่เลือก ({selected.size})
           </button>
         )}
-        <button className="ghost" onClick={logout} style={{ marginLeft:"auto", color:"var(--text3)" }}>
-          ออกจากระบบ
-        </button>
-        <span style={{ alignSelf:"center", fontSize:16, color:"var(--text3)" }}>{filtered.length} ราย</span>
+        <span style={{ marginLeft:"auto", alignSelf:"center", fontSize:16, color:"var(--text3)" }}>{filtered.length} ราย</span>
       </div>
 
       <div className="card" style={{ overflow:"hidden" }}>

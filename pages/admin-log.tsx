@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getApprovedImports, getTransactions, getAccessories, getSuppliers,
-  type ImportRow, type Transaction, type Accessory, type Supplier } from "@/lib/store";
+import { getApprovedImports, getTransactions, getAccessories, getSuppliers, getLotMap, valueFromLots,
+  type ImportRow, type Transaction, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 type LogEvent = {
@@ -28,6 +28,7 @@ export default function AdminLogPage() {
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [accs, setAccs] = useState<Accessory[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
 
   // filters
   const [kindFilter, setKindFilter] = useState<"all" | "added" | "transaction">("all");
@@ -41,8 +42,8 @@ export default function AdminLogPage() {
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([getApprovedImports(), getTransactions(), getAccessories(), getSuppliers()])
-      .then(([imp, tx, ac, su]) => { setApproved(imp); setTxns(tx); setAccs(ac); setSuppliers(su); })
+    Promise.all([getApprovedImports(), getTransactions(), getAccessories(), getSuppliers(), getLotMap()])
+      .then(([imp, tx, ac, su, lm]) => { setApproved(imp); setTxns(tx); setAccs(ac); setSuppliers(su); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, [authed]);
 
@@ -83,7 +84,7 @@ export default function AdminLogPage() {
   const pg = usePagination(filteredEvents, `${kindFilter}|${txFilter}|${search}`);
 
   // ── Summary totals ──
-  const totalValue = accs.reduce((s, a) => s + Number(a.quantity) * Number(a.unit_cost), 0);
+  const totalValue = accs.reduce((s, a) => s + valueFromLots(lotMap.get(a.id) ?? []), 0);
   const totalIn = txns.filter((t) => t.transaction_type === "IN" || t.transaction_type === "RETURN")
     .reduce((s, t) => s + Math.abs(Number(t.quantity)), 0);
   const totalOut = txns.filter((t) => t.transaction_type === "OUT")

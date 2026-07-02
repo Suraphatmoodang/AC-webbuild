@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getAccessories, addTransaction, type Accessory } from "@/lib/store";
+import { useRouter } from "next/router";
+import { getAccessories, addTransaction, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot } from "@/lib/store";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -11,22 +12,43 @@ const TX_LABELS: Record<TxType, { th: string; en: string }> = {
 };
 
 export default function TransactionsPage() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState(false);
   const [items, setItems] = useState<Accessory[]>([]);
+  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selected, setSelected] = useState<Accessory | null>(null);
   const [txType, setTxType] = useState<TxType>("IN");
   const [qty, setQty] = useState("");
+  const [price, setPrice] = useState("");           // IN / RETURN
+  const [lotId, setLotId] = useState("");           // OUT (optional) / ADJUST (required)
+  const [manualLot, setManualLot] = useState(false); // OUT: opt-in to pick a lot
+  const [returnPos, setReturnPos] = useState<"front" | "back" | "date">("back");
+  const [returnDate, setReturnDate] = useState(new Date().toISOString().split("T")[0]);
   const [refNo, setRefNo] = useState("");
   const [note, setNote] = useState("");
   const [by, setBy] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
+  // Auth gate — transactions is now protected
   useEffect(() => {
-    getAccessories().then(setItems).finally(() => setLoading(false));
-  }, []);
+    if (sessionStorage.getItem("manage_auth") !== "1") { router.replace("/login"); return; }
+    setAuthed(true);
+  }, [router]);
+
+  useEffect(() => {
+    if (!authed) return;
+    Promise.all([getAccessories(), getLotMap()])
+      .then(([accs, lm]) => { setItems(accs); setLotMap(lm); })
+      .finally(() => setLoading(false));
+  }, [authed]);
+
+  const lotsOf = (id: string) => lotMap.get(id) ?? [];
+  const stockOf = (id: string) => stockFromLots(lotsOf(id));
+  const valueOf = (id: string) => valueFromLots(lotsOf(id));
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
@@ -53,7 +75,7 @@ export default function TransactionsPage() {
     for (const i of items) {
       const g = map.get(i.type) ?? { count: 0, low: 0 };
       g.count += 1;
-      if (Number(i.quantity) <= Number(i.min_quantity)) g.low += 1;
+      if (stockOf(i.id) <= Number(i.min_quantity)) g.low += 1;
       map.set(i.type, g);
     }
     return Array.from(map.entries())
@@ -69,28 +91,51 @@ export default function TransactionsPage() {
   const handleSubmit = async () => {
     if (!selected) return;
     const q = parseFloat(qty);
-    if (isNaN(q) || q <= 0) { showToast("กรุณาระบุจำนวนที่ถูกต้อง", "error"); return; }
+    if (isNaN(q) || (txType !== "ADJUST" && q <= 0)) { showToast("กรุณาระบุจำนวนที่ถูกต้อง", "error"); return; }
+    if (txType === "ADJUST" && q < 0) { showToast("จำนวนต้องไม่ติดลบ", "error"); return; }
+    if ((txType === "IN" || txType === "RETURN")) {
+      const p = parseFloat(price);
+      if (isNaN(p) || p < 0) { showToast("กรุณาระบุราคาซื้อ", "error"); return; }
+    }
+    if (txType === "ADJUST" && !lotId) { showToast("กรุณาเลือกล็อตที่ต้องการปรับ", "error"); return; }
+
     setSaving(true);
-    const result = await addTransaction(selected.id, txType, q, refNo, note, by);
+    const result = await addTransaction({
+      accessory_id: selected.id,
+      type: txType,
+      qty: q,
+      unit_cost: (txType === "IN" || txType === "RETURN") ? parseFloat(price) || 0 : undefined,
+      lot_id: txType === "ADJUST" ? lotId : (txType === "OUT" && manualLot && lotId ? lotId : undefined),
+      return_position: txType === "RETURN" ? returnPos : undefined,
+      return_date: txType === "RETURN" && returnPos === "date" ? returnDate : undefined,
+      reference_no: refNo, note, created_by: by,
+    });
     setSaving(false);
     if ("error" in result) { showToast(result.error, "error"); return; }
     showToast(`✓ บันทึกแล้ว — ${TX_LABELS[txType].th} ${q} ${selected.unit}`, "success");
-    // Refresh list and update selected
-    const fresh = await getAccessories();
-    setItems(fresh);
+    // Refresh lots + items and update selected
+    const [fresh, lm] = await Promise.all([getAccessories(), getLotMap()]);
+    setItems(fresh); setLotMap(lm);
     setSelected(fresh.find((a) => a.id === selected.id) ?? null);
-    setQty(""); setRefNo(""); setNote("");
+    setQty(""); setPrice(""); setRefNo(""); setNote(""); setLotId(""); setManualLot(false);
   };
 
   const afterQty = () => {
     if (!selected) return null;
+    const cur = stockOf(selected.id);
     const q = parseFloat(qty) || 0;
-    if (txType === "IN" || txType === "RETURN") return Number(selected.quantity) + q;
-    if (txType === "OUT") return Number(selected.quantity) - q;
-    if (txType === "ADJUST") return q;
+    if (txType === "IN" || txType === "RETURN") return cur + q;
+    if (txType === "OUT") return cur - q;
+    if (txType === "ADJUST") {
+      const lot = lotsOf(selected.id).find((l) => l.id === lotId);
+      if (!lot) return null;
+      return cur - Number(lot.quantity_remaining) + q; // replace that lot's qty
+    }
     return null;
   };
   const after = afterQty();
+
+  if (!authed) return null;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20, alignItems: "start" }}>
@@ -130,7 +175,7 @@ export default function TransactionsPage() {
                   )}
                   {filtered.map((item) => {
                     const isSel = selected?.id === item.id;
-                    const isLow = Number(item.quantity) <= Number(item.min_quantity);
+                    const isLow = stockOf(item.id) <= Number(item.min_quantity);
                     return (
                       <tr key={item.id} style={{ cursor: "pointer", background: isSel ? "var(--bg4)" : undefined }}
                         onClick={() => { setSelected(item); setQty(""); }}>
@@ -145,7 +190,7 @@ export default function TransactionsPage() {
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
-                            {Number(item.quantity).toLocaleString()}
+                            {stockOf(item.id).toLocaleString()}
                           </span>
                           <span style={{ fontSize: 15, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
                         </td>
@@ -198,7 +243,7 @@ export default function TransactionsPage() {
                   )}
                   {variantsOfType.map((item) => {
                     const isSel = selected?.id === item.id;
-                    const isLow = Number(item.quantity) <= Number(item.min_quantity);
+                    const isLow = stockOf(item.id) <= Number(item.min_quantity);
                     return (
                       <tr key={item.id} style={{ cursor: "pointer", background: isSel ? "var(--bg4)" : undefined }}
                         onClick={() => { setSelected(item); setQty(""); }}>
@@ -214,7 +259,7 @@ export default function TransactionsPage() {
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
-                            {Number(item.quantity).toLocaleString()}
+                            {stockOf(item.id).toLocaleString()}
                           </span>
                           <span style={{ fontSize: 15, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
                         </td>
@@ -268,12 +313,12 @@ export default function TransactionsPage() {
           </div>
 
           <div className="form-row">
-            <label className="form-label">จำนวน{txType === "ADJUST" ? " (ยอดใหม่)" : ""} · {selected?.unit || "หน่วย"}</label>
+            <label className="form-label">จำนวน{txType === "ADJUST" ? " (ยอดใหม่ของล็อต)" : ""} · {selected?.unit || "หน่วย"}</label>
             <input type="number" min="0" step="any" placeholder="0" value={qty} onChange={(e) => setQty(e.target.value)}
               style={{ fontSize: 20, fontFamily: "var(--mono)", padding: "10px 12px" }} />
             {selected && qty && after !== null && (
               <div style={{ marginTop: 6, fontSize: 12, color: "var(--text2)", display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontFamily: "var(--mono)" }}>{Number(selected.quantity)}</span>
+                <span style={{ fontFamily: "var(--mono)" }}>{stockOf(selected.id).toLocaleString()}</span>
                 <span style={{ color: "var(--text3)" }}>→</span>
                 <span style={{ fontFamily: "var(--mono)", fontWeight: 500,
                   color: after < 0 ? "var(--red)" : after <= Number(selected.min_quantity) ? "var(--accent)" : "var(--green)" }}>
@@ -284,10 +329,69 @@ export default function TransactionsPage() {
             )}
           </div>
 
-          <div className="form-row">
-            <label className="form-label">วันที่ · Date</label>
-            <input type="date" defaultValue={new Date().toISOString().split("T")[0]} />
-          </div>
+          {/* Price — for IN and RETURN (creates a lot at this cost) */}
+          {(txType === "IN" || txType === "RETURN") && (
+            <div className="form-row">
+              <label className="form-label">ราคาซื้อ/หน่วย · Unit cost (฿)</label>
+              <input type="number" min="0" step="0.0001" placeholder="0.00" value={price} onChange={(e) => setPrice(e.target.value)}
+                style={{ fontFamily: "var(--mono)" }} />
+              <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>สร้างล็อตใหม่ที่ราคานี้</div>
+            </div>
+          )}
+
+          {/* RETURN positioning */}
+          {txType === "RETURN" && (
+            <div className="form-row">
+              <label className="form-label">ตำแหน่งในคิว · Queue position</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                {([["front","ใช้ก่อน"],["back","ใช้ทีหลัง"],["date","ตามวันที่"]] as const).map(([val, label]) => (
+                  <button key={val} onClick={() => setReturnPos(val)} style={{ fontSize: 13, padding: "8px 4px",
+                    ...(returnPos === val ? { borderColor: "var(--accent)", color: "var(--accent)" } : {}) }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {returnPos === "date" && (
+                <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} style={{ marginTop: 6 }} />
+              )}
+            </div>
+          )}
+
+          {/* OUT: optional manual lot selection (default auto FIFO/LIFO) */}
+          {txType === "OUT" && selected && (
+            <div className="form-row">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, color: "var(--text2)" }}>
+                <input type="checkbox" checked={manualLot} onChange={(e) => { setManualLot(e.target.checked); setLotId(""); }} style={{ width: "auto" }} />
+                เลือกล็อตเอง (ไม่ใช้ {selected.valuation_method === "lifo" ? "LIFO" : "FIFO"} อัตโนมัติ)
+              </label>
+              {manualLot && (
+                <select value={lotId} onChange={(e) => setLotId(e.target.value)} style={{ marginTop: 6 }}>
+                  <option value="">— เลือกล็อต —</option>
+                  {lotsOf(selected.id).filter((l) => Number(l.quantity_remaining) > 0).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {new Date(l.effective_date).toLocaleDateString("th-TH")} · เหลือ {Number(l.quantity_remaining)} · ฿{Number(l.unit_cost).toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* ADJUST: required lot selection */}
+          {txType === "ADJUST" && selected && (
+            <div className="form-row">
+              <label className="form-label">เลือกล็อตที่ปรับ · Lot</label>
+              <select value={lotId} onChange={(e) => setLotId(e.target.value)}>
+                <option value="">— เลือกล็อต —</option>
+                {lotsOf(selected.id).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {new Date(l.effective_date).toLocaleDateString("th-TH")} · เหลือ {Number(l.quantity_remaining)} · ฿{Number(l.unit_cost).toFixed(2)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="form-row">
             <label className="form-label">เลขที่อ้างอิง · Reference no.</label>
             <input placeholder="เลขที่ใบสั่งซื้อ / Job no. …" value={refNo} onChange={(e) => setRefNo(e.target.value)} />
@@ -304,14 +408,17 @@ export default function TransactionsPage() {
           {selected && (
             <div style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: "var(--r)", padding: "12px 14px", marginBottom: 14, fontSize: 15 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ color: "var(--text2)" }}>ต้นทุนคงเหลือ</span>
-                <span style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>
-                  ฿{(Number(selected.quantity) * Number(selected.unit_cost)).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+                <span style={{ color: "var(--text2)" }}>สต็อคคงเหลือ</span>
+                <span style={{ fontFamily: "var(--mono)" }}>{stockOf(selected.id).toLocaleString()} {selected.unit}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--text2)" }}>ราคาซื้อปัจจุบัน</span>
-                <span style={{ fontFamily: "var(--mono)" }}>฿{Number(selected.unit_cost).toFixed(2)} / {selected.unit}</span>
+                <span style={{ color: "var(--text2)" }}>มูลค่าคงเหลือ (รวมทุกล็อต)</span>
+                <span style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>
+                  ฿{valueOf(selected.id).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
+                {lotsOf(selected.id).filter((l) => Number(l.quantity_remaining) > 0).length} ล็อต · วิธี {selected.valuation_method === "lifo" ? "LIFO" : "FIFO"}
               </div>
             </div>
           )}

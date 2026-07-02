@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, type Accessory, type Supplier } from "@/lib/store";
+import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, createLot, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
@@ -10,7 +10,7 @@ type FormData = Omit<Accessory, "id" | "created_at" | "updated_at">;
 const emptyForm = (): FormData => ({
   type: "", acc_code: "", description: "", row: null,
   color: "", size: "", quantity: 0, unit: "เส้น",
-  unit_cost: 0, min_quantity: 10, supplier_id: null, is_active: true,
+  unit_cost: 0, min_quantity: 10, supplier_id: null, valuation_method: "fifo", is_active: true,
 });
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
@@ -142,6 +142,7 @@ export default function ManagePage() {
   const [authed, setAuthed]   = useState(false);
   const [items, setItems]     = useState<Accessory[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
   const [filterType, setFilterType]   = useState("");
@@ -167,22 +168,17 @@ export default function ManagePage() {
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([getAccessories(), getSuppliers()])
-      .then(([accs, sups]) => { setItems(accs); setSuppliers(sups); })
+    Promise.all([getAccessories(), getSuppliers(), getLotMap()])
+      .then(([accs, sups, lm]) => { setItems(accs); setSuppliers(sups); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, [authed]);
-
-  const logout = () => {
-    sessionStorage.removeItem("manage_auth");
-    router.push("/login");
-  };
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const refresh = () => getAccessories().then(setItems);
+  const refresh = () => Promise.all([getAccessories(), getLotMap()]).then(([a, lm]) => { setItems(a); setLotMap(lm); });
   const types   = Array.from(new Set(items.map((i) => i.type))).sort();
 
   const filtered = items.filter((i) => {
@@ -257,7 +253,7 @@ export default function ManagePage() {
       type: item.type, acc_code: item.acc_code, description: item.description,
       row: item.row, color: item.color, size: item.size, quantity: item.quantity,
       unit: item.unit, unit_cost: item.unit_cost, min_quantity: item.min_quantity,
-      supplier_id: item.supplier_id ?? null, is_active: item.is_active ?? true,
+      supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo", is_active: item.is_active ?? true,
     });
     setFormErrors({});
     setShowModal(true);
@@ -268,8 +264,24 @@ export default function ManagePage() {
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setSaving(true);
     try {
-      if (editId) { await updateAccessory(editId, form); showToast("อัพเดตแล้ว ✓", "success"); }
-      else        { await addAccessory(form);            showToast("เพิ่มรายการแล้ว ✓", "success"); }
+      if (editId) {
+        await updateAccessory(editId, form);
+        showToast("อัพเดตแล้ว ✓", "success");
+      } else {
+        const created = await addAccessory(form);
+        // If an initial stock was entered, seed it as an opening lot so it
+        // shows up under the lot model (stock is derived from lots).
+        if (Number(form.quantity) > 0) {
+          await createLot({
+            accessory_id: created.id,
+            quantity: Number(form.quantity),
+            unit_cost: Number(form.unit_cost) || 0,
+            source: "MIGRATION",
+            note: "ยอดเริ่มต้น",
+          });
+        }
+        showToast("เพิ่มรายการแล้ว ✓", "success");
+      }
       await refresh();
       setShowModal(false);
     } catch (e: any) {
@@ -318,10 +330,7 @@ export default function ManagePage() {
             ลบที่เลือก ({selected.size})
           </button>
         )}
-        <button className="ghost" onClick={logout} style={{ marginLeft:"auto", color:"var(--text3)" }}>
-          ออกจากระบบ
-        </button>
-        <span style={{ alignSelf:"center", fontSize:12, color:"var(--text3)" }}>{filtered.length} รายการ</span>
+        <span style={{ marginLeft:"auto", alignSelf:"center", fontSize:12, color:"var(--text3)" }}>{filtered.length} รายการ</span>
       </div>
 
       <div className="card" style={{ overflow:"hidden" }}>
@@ -356,7 +365,7 @@ export default function ManagePage() {
                     <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>
                     <td style={{ fontSize:17, color:"var(--text2)" }}>{suppliers.find((s) => s.id === item.supplier_id)?.supplier_name || "—"}</td>
-                    <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{Number(item.quantity).toLocaleString()}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{stockFromLots(lotMap.get(item.id) ?? []).toLocaleString()}</td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:15 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:16, color:"var(--text3)" }}>{Number(item.min_quantity).toLocaleString()}</td>
