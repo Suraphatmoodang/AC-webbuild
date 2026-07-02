@@ -136,9 +136,9 @@ export default function StockPage() {
         {loading ? (
           <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>กำลังโหลด…</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ height: "72vh", overflowY: "auto", overflowX: "auto" }}>
             <table>
-              <thead>
+              <thead className="sticky-head">
                 <tr>
                   <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
                   <th>สต็อค</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>สถานะ</th>

@@ -337,9 +337,9 @@ export default function ManagePage() {
         {loading ? (
           <div style={{ padding:48, textAlign:"center", color:"var(--text3)" }}>กำลังโหลด…</div>
         ) : (
-          <div style={{ overflowX:"auto" }}>
+          <div style={{ height:"72vh", overflowY:"auto", overflowX:"auto" }}>
             <table>
-              <thead>
+              <thead className="sticky-head">
                 <tr>
                   <th style={{ width:40, textAlign:"center" }}>
                     <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width:"auto", cursor:"pointer" }} />

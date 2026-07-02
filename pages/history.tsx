@@ -199,10 +199,10 @@ export default function HistoryPage() {
         {loading ? (
           <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>กำลังโหลด…</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ height: "72vh", overflowY: "auto", overflowX: "auto" }}>
             {view === "ledger" ? (
               <table>
-                <thead>
+                <thead className="sticky-head">
                   <tr>
                     <th>วันที่</th><th className="num">สต็อคเดิม</th><th className="num">รับเข้า</th><th className="num">เบิกใช้</th><th className="num">คงเหลือ</th><th>เลขที่ใบสั่งซื้อ</th><th>ผู้บันทึก</th>
                   </tr>
@@ -243,7 +243,7 @@ export default function HistoryPage() {
               </table>
             ) : (
               <table>
-                <thead>
+                <thead className="sticky-head">
                   <tr>
                     <th>วันที่</th><th>ประเภท</th><th>อุปกรณ์</th>
                     <th>สต็อคเดิม</th><th>รับเข้า</th><th>เบิกใช้</th><th>คงเหลือ</th>

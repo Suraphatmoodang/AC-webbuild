@@ -111,6 +111,8 @@ button.ghost:hover { background: var(--bg3); color: var(--text); }
 
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 14px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+/* Frozen header for scrollable tables: put on <thead>, wrap the table in a fixed-height overflow container. */
+thead.sticky-head th { position: sticky; top: 0; z-index: 10; background: var(--bg2); }
 td { padding: 10px 15px; border-bottom: 1px solid var(--border); font-size: 15px; vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--bg3); }
