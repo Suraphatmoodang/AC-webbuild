@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, createLot, type Accessory, type Supplier, type Lot } from "@/lib/store";
+import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
@@ -456,26 +456,75 @@ export default function ManagePage() {
                   </select>
                 </div>
                 <div>
-                  <label className="form-label">ราคาซื้อ (฿)</label>
-                  <input type="number" step="0.0001" value={form.unit_cost}
-                    onChange={(e) => f("unit_cost", parseFloat(e.target.value) || 0)} />
-                </div>
-              </div>
-
-              <div className="form-row form-grid form-grid-2">
-                <div>
-                  <label className="form-label">สต็อคเริ่มต้น</label>
-                  <input type="number" value={form.quantity}
-                    onChange={(e) => f("quantity", parseFloat(e.target.value) || 0)}
-                    style={formErrors.quantity ? {borderColor:"var(--red)"} : {}} />
-                  {formErrors.quantity && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.quantity}</div>}
-                </div>
-                <div>
                   <label className="form-label">สต็อคขั้นต่ำ (แจ้งเตือน)</label>
                   <input type="number" value={form.min_quantity}
                     onChange={(e) => f("min_quantity", parseFloat(e.target.value) || 0)} />
                 </div>
               </div>
+
+              {!editId ? (
+                /* ADD: these seed the opening lot (stock + price live in lots, not the accessory row) */
+                <div className="form-row form-grid form-grid-2">
+                  <div>
+                    <label className="form-label">ราคาซื้อเริ่มต้น (฿)</label>
+                    <input type="number" step="0.0001" value={form.unit_cost}
+                      onChange={(e) => f("unit_cost", parseFloat(e.target.value) || 0)} />
+                  </div>
+                  <div>
+                    <label className="form-label">สต็อคเริ่มต้น</label>
+                    <input type="number" value={form.quantity}
+                      onChange={(e) => f("quantity", parseFloat(e.target.value) || 0)}
+                      style={formErrors.quantity ? {borderColor:"var(--red)"} : {}} />
+                    {formErrors.quantity && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.quantity}</div>}
+                  </div>
+                </div>
+              ) : (
+                /* EDIT: stock & price come from lots — NOT editable here (editing the accessory
+                   row's price/qty does not touch lots). Show read-only totals + price history. */
+                (() => {
+                  const lots = lotMap.get(editId) ?? [];
+                  const stock = stockFromLots(lots);
+                  const value = valueFromLots(lots);
+                  const avg = stock > 0 ? value / stock : 0;
+                  // Each lot is a receipt at a price on a date → the item's price history. Newest first.
+                  const history = [...lots].sort((a, b) => new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime());
+                  const SOURCE_TH: Record<string, string> = { IN: "รับเข้า", RETURN: "คืนสต็อค", MIGRATION: "นำเข้า/ตั้งต้น", ADJUST: "ปรับยอด" };
+                  return (
+                    <div className="form-row">
+                      <div style={{ display:"flex", gap:12, marginBottom:10 }}>
+                        <div style={{ flex:1, background:"var(--bg3)", borderRadius:"var(--r)", padding:"8px 12px" }}>
+                          <div style={{ fontSize:12, color:"var(--text3)" }}>สต็อคปัจจุบัน</div>
+                          <div style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{stock.toLocaleString()} {form.unit}</div>
+                        </div>
+                        <div style={{ flex:1, background:"var(--bg3)", borderRadius:"var(--r)", padding:"8px 12px" }}>
+                          <div style={{ fontSize:12, color:"var(--text3)" }}>ราคาเฉลี่ย (จากล็อต)</div>
+                          <div style={{ fontFamily:"var(--mono)", fontWeight:500 }}>฿{avg.toLocaleString("th-TH", { minimumFractionDigits:2, maximumFractionDigits:2 })}</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize:12, color:"var(--text3)", marginBottom:4 }}>
+                        ประวัติราคา / การรับเข้า — แก้สต็อกหรือราคาผ่านหน้า “บันทึกรายการ” (รับเข้า) เท่านั้น
+                      </div>
+                      {history.length === 0 ? (
+                        <div style={{ fontSize:14, color:"var(--text3)", padding:"6px 0" }}>ยังไม่มีล็อต (ยังไม่มีการรับเข้า)</div>
+                      ) : (
+                        <div style={{ maxHeight:160, overflowY:"auto", border:"1px solid var(--border)", borderRadius:"var(--r)" }}>
+                          <div style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1.2fr", gap:4, fontSize:12, color:"var(--text3)", padding:"6px 10px", borderBottom:"1px solid var(--border)", position:"sticky", top:0, background:"var(--bg2)" }}>
+                            <span>วันที่</span><span className="num">รับเข้า</span><span className="num">ราคา/หน่วย</span><span>ที่มา</span>
+                          </div>
+                          {history.map((l) => (
+                            <div key={l.id} style={{ display:"grid", gridTemplateColumns:"1.2fr 1fr 1fr 1.2fr", gap:4, fontSize:13, padding:"6px 10px", borderBottom:"1px solid var(--border)" }}>
+                              <span style={{ fontFamily:"var(--mono)", color:"var(--text2)" }}>{new Date(l.effective_date).toLocaleDateString("th-TH")}</span>
+                              <span className="num" style={{ fontFamily:"var(--mono)" }}>{Number(l.quantity_received).toLocaleString()}</span>
+                              <span className="num" style={{ fontFamily:"var(--mono)" }}>฿{Number(l.unit_cost).toFixed(2)}</span>
+                              <span style={{ color:"var(--text3)", fontSize:12 }}>{SOURCE_TH[l.source] ?? l.source}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              )}
 
               {/* is_active toggle */}
               <div className="form-row">
