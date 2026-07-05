@@ -138,7 +138,7 @@ export default function TransactionsPage() {
   if (!authed) return null;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 20, alignItems: "start" }}>
+    <div className="tx-grid">
       {/* Item picker */}
       <div>
         <div style={{ marginBottom: 12 }}>

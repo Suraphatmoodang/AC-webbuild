@@ -100,7 +100,7 @@ export default function StockPage() {
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 24 }}>
+      <div className="stat-grid" style={{ marginBottom: 24 }}>
         {[
           { label: "รายการทั้งหมด", en: "Total items",  val: items.length, mono: false },
           { label: "มูลค่าสต็อค (฿)", en: "Stock value", val: "฿" + totalValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), mono: true },
@@ -128,7 +128,7 @@ export default function StockPage() {
           style={{ whiteSpace: "nowrap", ...(showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}) }}>
           ⚠ สต็อคต่ำ
         </button>
-        {authed && <button className="primary" onClick={() => { setAddForm(emptyAdd()); setAddErr(""); setShowAdd(true); }}>+ เพิ่มอุปกรณ์</button>}
+        <button className="primary" onClick={() => { setAddForm(emptyAdd()); setAddErr(""); setShowAdd(true); }}>+ เพิ่มอุปกรณ์</button>
         <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)", minWidth: 90, whiteSpace: "nowrap" }}>{filtered.length} รายการ</span>
       </div>
 

@@ -150,3 +150,38 @@ tr:hover td { background: var(--bg3); }
 .toast.success { border-color: var(--green); }
 .toast.error { border-color: var(--red); }
 @keyframes slideup { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Responsive layout ─────────────────────────────────────────
+   Base (desktop) values live here so media queries can override
+   without needing !important against inline styles. Class hooks:
+   .stat-grid (4-up summary cards), .tx-grid (transactions 2-col),
+   and .app-hdr / .app-nav / .app-main / .app-date on the shell. */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tx-grid   { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
+
+/* Tablets (≈12" and below): drop the transactions side panel under
+   the picker, tighten page padding. Stat cards stay 4-up here. */
+@media (max-width: 1024px) {
+  .app-main { padding: 16px !important; }
+  .app-hdr  { gap: 14px !important; padding: 0 16px !important; }
+  .tx-grid  { grid-template-columns: 1fr; }
+  .modal    { max-width: min(92vw, 560px); }
+}
+
+/* Small tablets / large phones: stat cards 2-up, header wraps so the
+   nav gets its own scrollable row under the logo. */
+@media (max-width: 820px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .app-hdr   { flex-wrap: wrap; height: auto !important; padding: 8px 14px !important; }
+  .app-nav   { order: 3; flex: 0 0 100% !important; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+  .app-nav::-webkit-scrollbar { height: 0; }
+  th, td { padding: 7px 9px; }
+}
+
+/* Phones: hide the header date, collapse the English nav subtitles. */
+@media (max-width: 560px) {
+  .app-date { display: none; }
+  .app-nav a > span:last-child { display: none; }
+  th { font-size: 12px; }
+  td { font-size: 13px; }
+}

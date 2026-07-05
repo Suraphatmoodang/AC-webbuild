@@ -108,7 +108,7 @@ export default function AdminLogPage() {
       <h2 style={{ fontSize: 22, fontWeight: 500, marginBottom: 16 }}>สรุปและบันทึกกิจกรรม</h2>
 
       {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 28 }}>
+      <div className="stat-grid" style={{ marginBottom: 28 }}>
         {summary.map((s) => (
           <div key={s.label} className="card" style={{ padding: "14px 16px" }}>
             <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>

@@ -1,8 +1,14 @@
 import type { AppProps } from "next/app";
+import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import "@/styles/globals.css";
+
+// Show the tab logo only on deployed (Vercel) builds. NODE_ENV is "production"
+// on any built/deployed site and "development" under `npm run dev`, so local
+// testing stays blank (default browser icon) while the live site shows the logo.
+const IS_DEPLOYED = process.env.NODE_ENV === "production";
 
 const NAV = [
   { href: "/", label: "สต็อค", en: "Stock", auth: false },
@@ -37,17 +43,21 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <Head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        {IS_DEPLOYED && <link rel="icon" type="image/png" href="/favicon.png" />}
+      </Head>
       <header style={{
         borderBottom: "1px solid var(--border)",
         background: "var(--bg)",
         position: "sticky", top: 0, zIndex: 50,
       }}>
-        <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 20, height: 70 }}>
+        <div className="app-hdr" style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 20, height: 70 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>ACC</span>
             <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>STOCK</span>
           </div>
-          <nav style={{ display: "flex", gap: 2, flex: 1 }}>
+          <nav className="app-nav" style={{ display: "flex", gap: 2, flex: 1 }}>
             {visibleNav.map((n) => {
               const active = router.pathname === n.href;
               return (
@@ -70,7 +80,7 @@ export default function App({ Component, pageProps }: AppProps) {
               );
             })}
           </nav>
-          <span style={{ fontSize: 16, color: "var(--text3)", fontFamily: "var(--mono)" }}>
+          <span className="app-date" style={{ fontSize: 16, color: "var(--text3)", fontFamily: "var(--mono)" }}>
             {new Date().toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" })}
           </span>
           {authed && (
@@ -85,7 +95,7 @@ export default function App({ Component, pageProps }: AppProps) {
           )}
         </div>
       </header>
-      <main style={{ flex: 1, maxWidth: 1280, margin: "0 auto", padding: "24px", width: "100%" }}>
+      <main className="app-main" style={{ flex: 1, maxWidth: 1280, margin: "0 auto", padding: "24px", width: "100%" }}>
         <Component {...pageProps} />
       </main>
     </div>
