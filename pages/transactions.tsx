@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addTransaction, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot } from "@/lib/store";
 import { SearchInput } from "@/lib/search";
+import { usePagination, PaginationBar } from "@/lib/pagination";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -89,6 +90,11 @@ export default function TransactionsPage() {
     ? items.filter((i) => i.type === selectedType)
     : [];
 
+  // Both lists can run into the thousands (e.g. ด้าย / ยาง), so page them —
+  // rendering every match at once locks the main thread and freezes the page.
+  const searchPg = usePagination(filtered, `search|${search}`);
+  const variantPg = usePagination(variantsOfType, `type|${selectedType ?? ""}`);
+
   const handleSubmit = async () => {
     if (!selected) return;
     const q = parseFloat(qty);
@@ -163,6 +169,7 @@ export default function TransactionsPage() {
             <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>กำลังโหลด…</div>
           ) : searching ? (
             /* ── SEARCH MODE: flat results across everything ── */
+            <>
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
               <table>
                 <thead>
@@ -174,7 +181,7 @@ export default function TransactionsPage() {
                   {filtered.length === 0 && (
                     <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                   )}
-                  {filtered.map((item) => {
+                  {searchPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
                     const isLow = stockOf(item.id) <= Number(item.min_quantity);
                     return (
@@ -202,6 +209,8 @@ export default function TransactionsPage() {
                 </tbody>
               </table>
             </div>
+            <PaginationBar {...searchPg} />
+            </>
           ) : !selectedType ? (
             /* ── STEP 1: pick a type ── */
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
@@ -231,6 +240,7 @@ export default function TransactionsPage() {
             </div>
           ) : (
             /* ── STEP 2: pick a variant (size / color) within the type ── */
+            <>
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
               <table>
                 <thead>
@@ -242,7 +252,7 @@ export default function TransactionsPage() {
                   {variantsOfType.length === 0 && (
                     <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
                   )}
-                  {variantsOfType.map((item) => {
+                  {variantPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
                     const isLow = stockOf(item.id) <= Number(item.min_quantity);
                     return (
@@ -271,6 +281,8 @@ export default function TransactionsPage() {
                 </tbody>
               </table>
             </div>
+            <PaginationBar {...variantPg} />
+            </>
           )}
         </div>
       </div>
