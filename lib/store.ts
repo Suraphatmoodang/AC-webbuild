@@ -718,7 +718,7 @@ export async function adjustLot(lotId: string, newRemaining: number): Promise<vo
 
 // ── Stock Updater (bulk update existing accessories by matching) ─────
 
-export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier";
+export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier" | "unit";
 
 // Build a code-aware match index over existing accessories.
 // Key: when acc_code present → type|code|description|color|size ; else → type|description|color|size
@@ -762,6 +762,7 @@ export async function applyStockUpdates(
     min_quantity?: number;
     unit_cost?: number;      // sheet price (for the replacement lot / field)
     description?: string;
+    unit?: string;
     supplier_id?: string | null;
     current_unit_cost: number; // fallback price if sheet has none
     sheet_has_price: boolean;
@@ -778,6 +779,7 @@ export async function applyStockUpdates(
       if (fields.includes("min_quantity") && u.min_quantity !== undefined) patch.min_quantity = u.min_quantity;
       if (fields.includes("unit_cost") && u.unit_cost !== undefined) patch.unit_cost = u.unit_cost;
       if (fields.includes("description") && u.description !== undefined) patch.description = u.description;
+      if (fields.includes("unit") && u.unit !== undefined) patch.unit = u.unit;
       if (fields.includes("supplier") && u.supplier_id !== undefined) patch.supplier_id = u.supplier_id;
       if (Object.keys(patch).length > 0) {
         const { error } = await supabase.from("accessories").update(patch).eq("id", u.accessory_id);

@@ -22,15 +22,17 @@ const UPDATE_COLUMNS: { field: UpdatableField; label: string; sheetKey: string }
   { field: "quantity",     label: "สต็อคคงเหลือ", sheetKey: "quantity" },
   { field: "min_quantity", label: "ขั้นต่ำ",       sheetKey: "min_quantity" },
   { field: "unit_cost",    label: "ราคาซื้อ",      sheetKey: "unit_cost" },
+  { field: "unit",         label: "หน่วย",         sheetKey: "unit" },
   { field: "description",  label: "รายละเอียด",    sheetKey: "description" },
   { field: "supplier",     label: "ซัพพลายเออร์",  sheetKey: "supplier_name" },
 ];
 
 type Row = {
   type: string; acc_code: string; description: string; color: string; size: string;
-  quantity: number; unit_cost: number; min_quantity: number; supplier_name: string;
+  quantity: number; unit_cost: number; min_quantity: number; unit: string; supplier_name: string;
   _match: "one" | "multi" | "none";
   _matchId?: string;
+  _matched?: Accessory;   // the single matched accessory (for "already up to date" checks)
   _matchCount: number;
 };
 
@@ -93,12 +95,13 @@ export default function StockUpdatePage() {
             type: str(g(r, "type")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
             color: str(g(r, "color")), size: str(g(r, "size")),
             quantity: num(g(r, "quantity")), unit_cost: num(g(r, "unit_cost")),
-            min_quantity: num(g(r, "min_quantity")), supplier_name: str(g(r, "supplier_name")),
+            min_quantity: num(g(r, "min_quantity")), unit: str(g(r, "unit")), supplier_name: str(g(r, "supplier_name")),
           };
           const key = matchKeyForRow(base);
           const matches = index.get(key) ?? [];
           const _match = matches.length === 0 ? "none" : matches.length === 1 ? "one" : "multi";
-          return { ...base, _match, _matchId: matches.length === 1 ? matches[0].id : undefined, _matchCount: matches.length };
+          return { ...base, _match, _matchId: matches.length === 1 ? matches[0].id : undefined,
+            _matched: matches.length === 1 ? matches[0] : undefined, _matchCount: matches.length };
         });
       setRows(parsed);
       // default mode: whatever updatable columns exist in the sheet, minus nothing preselected
@@ -117,7 +120,40 @@ export default function StockUpdatePage() {
     const next = new Set(mode);
     next.has(f) ? next.delete(f) : next.add(f);
     setMode(next);
+    // Drop selections that became no-ops under the new mode
+    const arr = Array.from(next);
+    const noop = (r: Row) => arr.length > 0 && !arr.some((ff) => fieldChanged(r, ff));
+    setSelected((prev) => new Set(Array.from(prev).filter((i) => rows[i] && rows[i]._match === "one" && !noop(rows[i]))));
   };
+
+  const supplierIdFor = (name: string): string | null => {
+    const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+    return suppliers.find((s) => norm(s.supplier_name) === norm(name))?.id ?? null;
+  };
+
+  // Would writing field `f` from this row actually change the matched accessory?
+  const sameStr = (a: string, b: string) => (a ?? "").trim() === (b ?? "").trim();
+  const fieldChanged = (r: Row, f: UpdatableField): boolean => {
+    const a = r._matched;
+    if (!a) return true; // no baseline → treat as a change
+    switch (f) {
+      case "quantity":     return Number(a.quantity) !== r.quantity;
+      case "min_quantity": return Number(a.min_quantity) !== r.min_quantity;
+      case "unit_cost":    return Number(a.unit_cost) !== r.unit_cost;
+      case "unit":         return !sameStr(a.unit, r.unit);
+      case "description":  return !sameStr(a.description, r.description);
+      case "supplier": {
+        const sid = supplierIdFor(r.supplier_name);
+        if (sid == null) return false; // no matching supplier → current value left untouched
+        return sid !== (a.supplier_id ?? null);
+      }
+    }
+  };
+  // A row is a no-op when EVERY selected field already matches the current value.
+  const modeArr = Array.from(mode);
+  const isNoop = (r: Row) => modeArr.length > 0 && !modeArr.some((f) => fieldChanged(r, f));
+  // Selectable = single match AND (no mode chosen yet, or at least one selected field differs)
+  const isSelectable = (r: Row) => r._match === "one" && !isNoop(r);
 
   // Visible rows (search + optional hide-unmatched)
   const visible = rows.map((r, i) => ({ r, i })).filter(({ r }) => {
@@ -130,8 +166,8 @@ export default function StockUpdatePage() {
 
   const pg = usePagination(visible, `${search}|${hideUnmatched}`, 250);
 
-  // Only single-match rows are selectable
-  const selectableOnPage = pg.pageItems.filter(({ r }) => r._match === "one").map(({ i }) => i);
+  // Only single-match rows that would actually change are selectable
+  const selectableOnPage = pg.pageItems.filter(({ r }) => isSelectable(r)).map(({ i }) => i);
   const allSel = selectableOnPage.length > 0 && selectableOnPage.every((i) => selected.has(i));
   const toggleAll = () => {
     const next = new Set(selected);
@@ -151,16 +187,11 @@ export default function StockUpdatePage() {
     showToast("ลบรายการที่ไม่ตรงออกแล้ว", "success");
   };
 
-  const supplierIdFor = (name: string): string | null => {
-    const norm = (s: string) => s.trim().replace(/\s+/g, " ");
-    return suppliers.find((s) => norm(s.supplier_name) === norm(name))?.id ?? null;
-  };
-
   const doApply = async () => {
     const fields = Array.from(mode);
     if (fields.length === 0) { showToast("กรุณาเลือกคอลัมน์ที่จะอัปเดต", "error"); return; }
-    const chosen = Array.from(selected).map((i) => rows[i]).filter((r) => r && r._match === "one" && r._matchId);
-    if (chosen.length === 0) { showToast("ไม่มีรายการที่เลือก", "error"); return; }
+    const chosen = Array.from(selected).map((i) => rows[i]).filter((r) => r && r._match === "one" && r._matchId && !isNoop(r));
+    if (chosen.length === 0) { showToast("ไม่มีรายการที่ต้องอัปเดต (ค่าตรงกันอยู่แล้ว)", "error"); return; }
 
     setSaving(true);
     try {
@@ -175,6 +206,7 @@ export default function StockUpdatePage() {
         min_quantity: r.min_quantity,
         unit_cost: r.unit_cost,
         description: r.description,
+        unit: r.unit,
         // Only carry a supplier_id when the sheet name actually matches an
         // existing supplier. No match → undefined so the store LEAVES the
         // item's current supplier untouched (never silently clears it).
@@ -200,6 +232,8 @@ export default function StockUpdatePage() {
   const counts = { one: 0, multi: 0, none: 0 } as Record<string, number>;
   rows.forEach((r) => counts[r._match]++);
   const stockInMode = mode.has("quantity");
+  // Matched rows whose selected fields already equal the current values (skipped)
+  const noopCount = mode.size > 0 ? rows.filter((r) => r._match === "one" && isNoop(r)).length : 0;
 
   return (
     <div>
@@ -253,6 +287,11 @@ export default function StockUpdatePage() {
               ⚠ การอัปเดตสต็อคจะลบล็อตเดิมทั้งหมดและสร้างล็อตใหม่ (ราคาจากไฟล์ หรือราคาปัจจุบันหากไม่มี)
             </div>
           )}
+          {noopCount > 0 && (
+            <div style={{ marginTop: 10, fontSize: 13, color: "var(--text3)" }}>
+              ข้าม {noopCount} รายการที่ค่าตรงกับข้อมูลปัจจุบันอยู่แล้ว
+            </div>
+          )}
         </div>
       )}
 
@@ -283,21 +322,22 @@ export default function StockUpdatePage() {
             <table style={{ tableLayout: "fixed", minWidth: 1000 }}>
               <colgroup>
                 <col style={{ width: "44px" }} /><col style={{ width: "13%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "20%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "9%" }} /><col style={{ width: "14%" }} /><col style={{ width: "10%" }} />
+                <col style={{ width: "18%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} /><col style={{ width: "11%" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                 <tr>
                   <th style={{ textAlign: "center", background: "var(--bg2)" }}>
                     <input type="checkbox" checked={allSel} onChange={toggleAll} style={{ width: "auto", cursor: "pointer" }} />
                   </th>
-                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
+                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
                 </tr>
               </thead>
               <tbody>
                 {pg.pageItems.map(({ r, i }) => {
                   const sel = selected.has(i);
-                  const canSelect = r._match === "one";
+                  const noop = r._match === "one" && isNoop(r);
+                  const canSelect = isSelectable(r);
                   return (
                     <tr key={i} style={{ opacity: canSelect ? 1 : 0.55, background: sel ? "var(--bg4)" : undefined }}>
                       <td style={{ textAlign: "center" }}>
@@ -310,8 +350,11 @@ export default function StockUpdatePage() {
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.quantity.toLocaleString()}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.min_quantity.toLocaleString()}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.unit_cost ? `฿${r.unit_cost.toFixed(2)}` : "—"}</td>
+                      <td style={{ fontSize: 14, color: "var(--text2)" }}>{r.unit || "—"}</td>
                       <td>
-                        {r._match === "one" ? <span style={{ fontSize: 14, color: "var(--green)" }}>✓ ตรงกัน</span>
+                        {r._match === "one"
+                          ? (noop ? <span style={{ fontSize: 14, color: "var(--text3)" }}>ค่าตรงกันแล้ว</span>
+                                  : <span style={{ fontSize: 14, color: "var(--green)" }}>✓ ตรงกัน</span>)
                           : r._match === "multi" ? <span className="badge badge-low">ซ้ำ {r._matchCount}</span>
                           : <span className="badge badge-out">ไม่พบ</span>}
                       </td>
