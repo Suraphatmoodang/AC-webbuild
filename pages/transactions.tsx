@@ -143,7 +143,7 @@ export default function TransactionsPage() {
       {/* Item picker */}
       <div>
         <div style={{ marginBottom: 12 }}>
-          <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาอุปกรณ์ที่ต้องการบันทึก…" />
+          <SearchInput value={search} onChange={(v) => { setSearch(v); if (v.trim()) setSelectedType(null); }} placeholder="ค้นหาอุปกรณ์ที่ต้องการบันทึก…" />
         </div>
 
         {/* Breadcrumb / back bar — only when drilled into a type and not searching */}

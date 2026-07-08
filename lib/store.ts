@@ -718,10 +718,10 @@ export async function adjustLot(lotId: string, newRemaining: number): Promise<vo
 
 // ── Stock Updater (bulk update existing accessories by matching) ─────
 
-export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier" | "unit";
+export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier" | "unit" | "acc_code";
 
 // Build a code-aware match index over existing accessories.
-// Key: when acc_code present → type|code|description|color|size ; else → type|description|color|size
+// Two key shapes: C = type|code|description|color|size ; D = type|description|color|size.
 // `size` is appended as a TIEBREAKER: it's blank on ~98% of rows (a no-op there,
 // identical to matching without it), but on the ~2% that carry a size it separates
 // otherwise-identical size-variants (e.g. the same zip in 5/6/7 นิ้ว) that would
@@ -729,27 +729,39 @@ export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "descri
 // never merge them, so it introduces no new collisions. This also makes the updater
 // consistent with the importer's dedupe (IMPORT_MATCH_FIELDS / getDuplicateMap),
 // both of which already include size.
-function accessoryMatchKey(a: { type: string; acc_code: string; description: string; color: string; size: string }): string {
+const dKey = (a: { type: string; description: string; color: string; size: string }): string => {
   const n = (v: string) => normalizeForMatch(v);
-  return a.acc_code.trim()
-    ? `C|${n(a.type)}|${n(a.acc_code)}|${n(a.description)}|${n(a.color)}|${n(a.size)}`
-    : `D|${n(a.type)}|${n(a.description)}|${n(a.color)}|${n(a.size)}`;
+  return `D|${n(a.type)}|${n(a.description)}|${n(a.color)}|${n(a.size)}`;
+};
+const cKey = (a: { type: string; acc_code: string; description: string; color: string; size: string }): string => {
+  const n = (v: string) => normalizeForMatch(v);
+  return `C|${n(a.type)}|${n(a.acc_code)}|${n(a.description)}|${n(a.color)}|${n(a.size)}`;
+};
+
+// Keys under which an EXISTING accessory is indexed. A coded item is reachable both
+// by its precise C-key AND by a code-less D-key, so an update-sheet row that omits
+// the code can still match it (matched only when the D-fields are unambiguous).
+function accessoryIndexKeys(a: { type: string; acc_code: string; description: string; color: string; size: string }): string[] {
+  return a.acc_code.trim() ? [cKey(a), dKey(a)] : [dKey(a)];
 }
 
 export async function buildAccessoryMatchIndex(): Promise<Map<string, Accessory[]>> {
   const accs = await getAccessories();
   const map = new Map<string, Accessory[]>();
   for (const a of accs) {
-    const k = accessoryMatchKey(a);
-    const arr = map.get(k) ?? [];
-    arr.push(a);
-    map.set(k, arr);
+    for (const k of accessoryIndexKeys(a)) {
+      const arr = map.get(k) ?? [];
+      arr.push(a);
+      map.set(k, arr);
+    }
   }
   return map;
 }
 
+// A sheet row's single lookup key: with a code it must match a coded item exactly
+// (C-key); without a code it matches by D-fields, reaching coded items too.
 export function matchKeyForRow(r: { type: string; acc_code: string; description: string; color: string; size: string }): string {
-  return accessoryMatchKey(r);
+  return r.acc_code.trim() ? cKey(r) : dKey(r);
 }
 
 // Apply a bulk update to matched accessories. Each entry pairs an accessory id
@@ -763,6 +775,7 @@ export async function applyStockUpdates(
     unit_cost?: number;      // sheet price (for the replacement lot / field)
     description?: string;
     unit?: string;
+    acc_code?: string;
     supplier_id?: string | null;
     current_unit_cost: number; // fallback price if sheet has none
     sheet_has_price: boolean;
@@ -780,6 +793,8 @@ export async function applyStockUpdates(
       if (fields.includes("unit_cost") && u.unit_cost !== undefined) patch.unit_cost = u.unit_cost;
       if (fields.includes("description") && u.description !== undefined) patch.description = u.description;
       if (fields.includes("unit") && u.unit !== undefined) patch.unit = u.unit;
+      // acc_code may be intentionally set to "" (to clear a wrongly-stored code)
+      if (fields.includes("acc_code") && u.acc_code !== undefined) patch.acc_code = u.acc_code;
       if (fields.includes("supplier") && u.supplier_id !== undefined) patch.supplier_id = u.supplier_id;
       if (Object.keys(patch).length > 0) {
         const { error } = await supabase.from("accessories").update(patch).eq("id", u.accessory_id);

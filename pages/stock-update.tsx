@@ -23,6 +23,7 @@ const UPDATE_COLUMNS: { field: UpdatableField; label: string; sheetKey: string }
   { field: "min_quantity", label: "ขั้นต่ำ",       sheetKey: "min_quantity" },
   { field: "unit_cost",    label: "ราคาซื้อ",      sheetKey: "unit_cost" },
   { field: "unit",         label: "หน่วย",         sheetKey: "unit" },
+  { field: "acc_code",     label: "รหัสสินค้า",     sheetKey: "acc_code" },
   { field: "description",  label: "รายละเอียด",    sheetKey: "description" },
   { field: "supplier",     label: "ซัพพลายเออร์",  sheetKey: "supplier_name" },
 ];
@@ -42,6 +43,7 @@ export default function StockUpdatePage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [sheetCols, setSheetCols] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<Set<UpdatableField>>(new Set());
+  const [overwrite, setOverwrite] = useState(false); // apply even when values already match
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [fileName, setFileName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set()); // by row index
@@ -122,7 +124,7 @@ export default function StockUpdatePage() {
     setMode(next);
     // Drop selections that became no-ops under the new mode
     const arr = Array.from(next);
-    const noop = (r: Row) => arr.length > 0 && !arr.some((ff) => fieldChanged(r, ff));
+    const noop = (r: Row) => !overwrite && arr.length > 0 && !arr.some((ff) => fieldChanged(r, ff));
     setSelected((prev) => new Set(Array.from(prev).filter((i) => rows[i] && rows[i]._match === "one" && !noop(rows[i]))));
   };
 
@@ -141,6 +143,7 @@ export default function StockUpdatePage() {
       case "min_quantity": return Number(a.min_quantity) !== r.min_quantity;
       case "unit_cost":    return Number(a.unit_cost) !== r.unit_cost;
       case "unit":         return !sameStr(a.unit, r.unit);
+      case "acc_code":     return !sameStr(a.acc_code, r.acc_code);
       case "description":  return !sameStr(a.description, r.description);
       case "supplier": {
         const sid = supplierIdFor(r.supplier_name);
@@ -150,8 +153,9 @@ export default function StockUpdatePage() {
     }
   };
   // A row is a no-op when EVERY selected field already matches the current value.
+  // Overwrite mode disables this so matched rows apply even when unchanged.
   const modeArr = Array.from(mode);
-  const isNoop = (r: Row) => modeArr.length > 0 && !modeArr.some((f) => fieldChanged(r, f));
+  const isNoop = (r: Row) => !overwrite && modeArr.length > 0 && !modeArr.some((f) => fieldChanged(r, f));
   // Selectable = single match AND (no mode chosen yet, or at least one selected field differs)
   const isSelectable = (r: Row) => r._match === "one" && !isNoop(r);
 
@@ -207,6 +211,7 @@ export default function StockUpdatePage() {
         unit_cost: r.unit_cost,
         description: r.description,
         unit: r.unit,
+        acc_code: r.acc_code,
         // Only carry a supplier_id when the sheet name actually matches an
         // existing supplier. No match → undefined so the store LEAVES the
         // item's current supplier untouched (never silently clears it).
@@ -282,6 +287,19 @@ export default function StockUpdatePage() {
               );
             })}
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 14, color: "var(--text2)", cursor: "pointer" }}>
+            <input type="checkbox" checked={overwrite} onChange={(e) => {
+              const on = e.target.checked;
+              setOverwrite(on);
+              // Turning overwrite off can make some selected rows no-ops again → drop them
+              if (!on) {
+                const arr = Array.from(mode);
+                const noop = (r: Row) => arr.length > 0 && !arr.some((ff) => fieldChanged(r, ff));
+                setSelected((prev) => new Set(Array.from(prev).filter((i) => rows[i] && rows[i]._match === "one" && !noop(rows[i]))));
+              }
+            }} style={{ width: "auto" }} />
+            เขียนทับทุกรายการที่จับคู่ได้ (รวมค่าที่ตรงกันอยู่แล้ว)
+          </label>
           {stockInMode && (
             <div style={{ marginTop: 10, fontSize: 13, color: "var(--accent)" }}>
               ⚠ การอัปเดตสต็อคจะลบล็อตเดิมทั้งหมดและสร้างล็อตใหม่ (ราคาจากไฟล์ หรือราคาปัจจุบันหากไม่มี)
@@ -289,7 +307,7 @@ export default function StockUpdatePage() {
           )}
           {noopCount > 0 && (
             <div style={{ marginTop: 10, fontSize: 13, color: "var(--text3)" }}>
-              ข้าม {noopCount} รายการที่ค่าตรงกับข้อมูลปัจจุบันอยู่แล้ว
+              ข้าม {noopCount} รายการที่ค่าตรงกับข้อมูลปัจจุบันอยู่แล้ว (เปิด "เขียนทับ" เพื่ออัปเดตด้วย)
             </div>
           )}
         </div>
