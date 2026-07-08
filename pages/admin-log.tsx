@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import { getApprovedImports, getTransactions, getAccessories, getSuppliers, getLotMap, valueFromLots,
   type ImportRow, type Transaction, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { SearchInput } from "@/lib/search";
 
 type LogEvent = {
   id: string;
@@ -121,7 +122,7 @@ export default function AdminLogPage() {
       {/* Log filters */}
       <h3 style={{ fontSize: 17, fontWeight: 500, marginBottom: 10 }}>บันทึกกิจกรรม</h3>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: "1 1 200px" }} />
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา…" style={{ flex: "1 1 200px" }} />
         <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value as any)} style={{ width: "auto", minWidth: 150 }}>
           <option value="all">ทุกประเภท</option>
           <option value="added">รายการที่เพิ่ม</option>

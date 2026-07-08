@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getPendingImports, approveImports, rejectImports, getDuplicateMap, getSuppliers,
+import { getPendingImports, approveImports, rejectImports, getDuplicateMap, getSuppliers, updateImportRow,
   type ImportRow, type Accessory, type Supplier } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { SearchInput } from "@/lib/search";
 
 const PAGE_SIZES = [100, 250, 500];
 
@@ -22,6 +23,8 @@ export default function ImportReviewPage() {
   const [pageSize, setPageSize] = useState(100);
   const [detailRow, setDetailRow] = useState<ImportRow | null>(null);   // full-detail modal
   const [compareRow, setCompareRow] = useState<ImportRow | null>(null); // duplicate compare modal
+  const [editRow, setEditRow] = useState<ImportRow | null>(null);       // manual-fix modal
+  const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [completion, setCompletion] = useState<null | { added: number; overwritten: number; failed: number; errors: string[] }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -137,6 +140,48 @@ export default function ImportReviewPage() {
     else doApprove();
   };
 
+  // Manual edit of a staged row before it's written to the database.
+  const normName = (s: string) => String(s ?? "").trim().replace(/\s+/g, " ");
+  const openEdit = (r: ImportRow) => {
+    // Snap the incoming supplier name to an existing supplier's exact name if it
+    // matches (whitespace-insensitive), so the dropdown shows it selected.
+    const matchedSup = suppliers.find((s) => normName(s.supplier_name) === normName(r.supplier_name));
+    setEditForm({
+      type: r.type, acc_code: r.acc_code, description: r.description,
+      row: r.row, color: r.color, size: r.size,
+      quantity: r.quantity, min_quantity: r.min_quantity,
+      unit: r.unit, unit_cost: r.unit_cost,
+      supplier_name: matchedSup ? matchedSup.supplier_name : r.supplier_name,
+    });
+    setEditRow(r);
+  };
+  const ef = (k: string, v: any) => setEditForm((p) => ({ ...p, [k]: v }));
+
+  const saveEdit = async () => {
+    if (!editRow) return;
+    if (!String(editForm.type).trim() || !String(editForm.unit).trim()) {
+      showToast("ต้องระบุประเภทและหน่วย", "error"); return;
+    }
+    setSaving(true);
+    try {
+      const patch = {
+        type: String(editForm.type).trim(), acc_code: String(editForm.acc_code).trim(),
+        description: String(editForm.description).trim(),
+        row: editForm.row === "" || editForm.row === null ? null : parseInt(String(editForm.row)) || null,
+        color: String(editForm.color).trim(), size: String(editForm.size).trim(),
+        quantity: Number(editForm.quantity) || 0, min_quantity: Number(editForm.min_quantity) || 0,
+        unit: String(editForm.unit).trim(), unit_cost: Number(editForm.unit_cost) || 0,
+        supplier_name: String(editForm.supplier_name).trim(),
+      };
+      const updated = await updateImportRow(editRow.id, patch);
+      setRows((prev) => prev.map((r) => (r.id === editRow.id ? { ...r, ...updated } : r)));
+      setEditRow(null);
+      showToast("บันทึกการแก้ไขแล้ว ✓", "success");
+    } catch (e: any) {
+      showToast("เกิดข้อผิดพลาด: " + (e.message ?? ""), "error");
+    } finally { setSaving(false); }
+  };
+
   const handleReject = async () => {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
@@ -156,7 +201,7 @@ export default function ImportReviewPage() {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: "1 1 220px" }} />
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา…" style={{ flex: "1 1 220px" }} />
         <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ width: "auto" }}>
           {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} ต่อหน้า</option>)}
         </select>
@@ -225,8 +270,10 @@ export default function ImportReviewPage() {
                           : <span style={{ fontSize: 14, color: "var(--green)" }}>✓ ใหม่</span>}
                       </td>
                       <td>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          <button className="ghost" style={{ padding: "3px 6px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => openEdit(r)}>แก้ไข</button>
                         {valid && dup && (
-                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          <>
                             <button className="ghost" style={{ padding: "3px 6px", fontSize: 13, whiteSpace: "nowrap" }} onClick={() => setCompareRow(r)}>เทียบ</button>
                             {multi ? (
                               <span style={{ fontSize: 12, color: "var(--text3)", alignSelf: "center" }}>ซ้ำหลายรายการ</span>
@@ -240,8 +287,9 @@ export default function ImportReviewPage() {
                                   onClick={() => setRes(r.id, "old")}>คงเดิม</button>
                               </>
                             )}
-                          </div>
+                          </>
                         )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -359,6 +407,87 @@ export default function ImportReviewPage() {
           </div>
         );
       })()}
+
+      {/* Manual edit of a staged row (fix data before it is written to the DB) */}
+      {editRow && (
+        <div className="modal-overlay" onClick={() => setEditRow(null)}>
+          <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight: 500 }}>แก้ไขรายการนำเข้า</div>
+              <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setEditRow(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-row form-grid form-grid-2">
+                <div>
+                  <label className="form-label">ประเภท <span style={{ color: "var(--red)" }}>*</span></label>
+                  <input value={editForm.type} onChange={(e) => ef("type", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">รหัสสินค้า</label>
+                  <input value={editForm.acc_code} onChange={(e) => ef("acc_code", e.target.value)} />
+                </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">รายละเอียด</label>
+                <input value={editForm.description} onChange={(e) => ef("description", e.target.value)} />
+              </div>
+              <div className="form-row form-grid form-grid-3">
+                <div>
+                  <label className="form-label">สี</label>
+                  <input value={editForm.color} onChange={(e) => ef("color", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">ขนาด</label>
+                  <input value={editForm.size} onChange={(e) => ef("size", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">แถว (ด้าย)</label>
+                  <input type="number" value={editForm.row ?? ""} onChange={(e) => ef("row", e.target.value)} placeholder="—" />
+                </div>
+              </div>
+              <div className="form-row form-grid form-grid-2">
+                <div>
+                  <label className="form-label">หน่วย <span style={{ color: "var(--red)" }}>*</span></label>
+                  <input value={editForm.unit} onChange={(e) => ef("unit", e.target.value)} placeholder="เช่น เส้น" />
+                </div>
+                <div>
+                  <label className="form-label">ราคาซื้อ (฿)</label>
+                  <input type="number" step="0.0001" value={editForm.unit_cost} onChange={(e) => ef("unit_cost", e.target.value)} />
+                </div>
+              </div>
+              <div className="form-row form-grid form-grid-2">
+                <div>
+                  <label className="form-label">สต็อค</label>
+                  <input type="number" value={editForm.quantity} onChange={(e) => ef("quantity", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">ขั้นต่ำ</label>
+                  <input type="number" value={editForm.min_quantity} onChange={(e) => ef("min_quantity", e.target.value)} />
+                </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">ซัพพลายเออร์</label>
+                <select value={editForm.supplier_name || ""} onChange={(e) => ef("supplier_name", e.target.value)}>
+                  <option value="">— ไม่ระบุ —</option>
+                  {editForm.supplier_name && !suppliers.some((s) => s.supplier_name === editForm.supplier_name) && (
+                    <option value={editForm.supplier_name}>{editForm.supplier_name} — ไม่ตรงกับรายชื่อ</option>
+                  )}
+                  {suppliers.map((s) => <option key={s.id} value={s.supplier_name}>{s.supplier_name}</option>)}
+                </select>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
+                  เลือกจากรายชื่อที่มีอยู่ หรือเว้นว่างหากไม่มีที่ตรง — ระบบไม่สร้างซัพพลายเออร์ใหม่
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setEditRow(null)}>ยกเลิก</button>
+              <button className="primary" onClick={saveEdit} disabled={saving}>
+                {saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Overwrite confirmation */}
       {confirmOverwrite && (

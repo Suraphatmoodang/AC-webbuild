@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, bulkDeleteSuppliers, type Supplier } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { SearchInput } from "@/lib/search";
 
 type FormData = Omit<Supplier, "id" | "created_at" | "updated_at">;
 
@@ -154,8 +155,7 @@ export default function SuppliersPage() {
   return (
     <div>
       <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
-        <input placeholder="ค้นหาชื่อ ผู้ติดต่อ เบอร์ อีเมล…" value={search}
-          onChange={(e) => setSearch(e.target.value)} style={{ flex:"1 1 240px" }} />
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาชื่อ ผู้ติดต่อ เบอร์ อีเมล…" style={{ flex:"1 1 240px" }} />
         <button className="primary" onClick={openAdd}>+ เพิ่มซัพพลายเออร์</button>
         {selected.size > 0 && (
           <button className="danger" onClick={() => setBulkConfirm(true)} disabled={saving}>

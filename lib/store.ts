@@ -457,6 +457,22 @@ export async function stageAccessory(
   return { skipped: false };
 }
 
+// Edit a pending staging row before approval (fix typos, wrong numbers, etc.).
+// Only the data fields — id/batch/status/timestamps stay managed by the system.
+export async function updateImportRow(
+  id: string,
+  input: Partial<Omit<ImportRow, "id" | "batch_id" | "status" | "created_at" | "approved_at">>
+): Promise<ImportRow> {
+  const { data, error } = await supabase
+    .from("accessory_imports")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // Purge approved staging rows older than N days. Not yet wired to any UI —
 // call this (manually or from a scheduled job) when the log table grows large.
 // The accessories themselves are unaffected; only the log source rows are removed.

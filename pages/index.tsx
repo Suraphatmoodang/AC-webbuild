@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, getSuppliers, stageAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Supplier, type ImportRow, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { SearchInput } from "@/lib/search";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -116,10 +117,7 @@ export default function StockPage() {
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: "1 1 240px" }}>
-          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)" }}>🔍</span>
-          <input placeholder="ค้นหาชื่อ รหัส สี ขนาด…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 32 }} />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาชื่อ รหัส สี ขนาด…" leftIcon="🔍" style={{ flex: "1 1 240px" }} />
         <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width: "auto", minWidth: 160 }}>
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}

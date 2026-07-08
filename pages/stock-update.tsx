@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { buildAccessoryMatchIndex, matchKeyForRow, applyStockUpdates, getSuppliers,
   type Accessory, type Supplier, type UpdatableField } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { SearchInput } from "@/lib/search";
 
 // Header-name → field mapping (same sheet layout as the importer)
 const HEADER_MAP: Record<string, string[]> = {
@@ -258,7 +259,7 @@ export default function StockUpdatePage() {
       {/* Controls */}
       {rows.length > 0 && (
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: "1 1 200px" }} />
+          <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา…" style={{ flex: "1 1 200px" }} />
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "var(--text2)", cursor: "pointer" }}>
             <input type="checkbox" checked={hideUnmatched} onChange={(e) => setHideUnmatched(e.target.checked)} style={{ width: "auto" }} />
             ซ่อนที่ไม่ตรง

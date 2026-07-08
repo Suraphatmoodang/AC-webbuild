@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addTransaction, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot } from "@/lib/store";
+import { SearchInput } from "@/lib/search";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -142,7 +143,7 @@ export default function TransactionsPage() {
       {/* Item picker */}
       <div>
         <div style={{ marginBottom: 12 }}>
-          <input placeholder="ค้นหาอุปกรณ์ที่ต้องการบันทึก…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาอุปกรณ์ที่ต้องการบันทึก…" />
         </div>
 
         {/* Breadcrumb / back bar — only when drilled into a type and not searching */}

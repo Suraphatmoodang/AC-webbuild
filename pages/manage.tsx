@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { SearchInput } from "@/lib/search";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -315,7 +316,7 @@ export default function ManagePage() {
   return (
     <div>
       <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
-        <input placeholder="ค้นหา…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex:"1 1 200px" }} />
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา…" style={{ flex:"1 1 200px" }} />
         <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width:"auto", minWidth:160 }}>
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
