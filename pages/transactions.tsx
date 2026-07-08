@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addTransaction, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot } from "@/lib/store";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
+import { compareAccessory } from "@/lib/sort";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -12,27 +13,6 @@ const TX_LABELS: Record<TxType, { th: string; en: string }> = {
   ADJUST: { th: "ปรับยอด",  en: "Adjust"  },
   RETURN: { th: "คืนสต็อค", en: "Return"  },
 };
-
-// Ordering of garment sizes (smallest → largest). "XXL" and "2XL" are treated
-// as equal rank since the data uses both interchangeably.
-const SIZE_RANK: Record<string, number> = {
-  XXS: 0, "2XS": 1, XS: 2, S: 3, M: 4, L: 5, XL: 6,
-  XXL: 7, "2XL": 7, XXXL: 8, "3XL": 8, "4XL": 9, "5XL": 10,
-  "6XL": 11, "7XL": 12, "8XL": 13, "9XL": 14, "10XL": 15,
-};
-const compareSize = (a: string, b: string): number => {
-  const na = (a || "").trim().toUpperCase(), nb = (b || "").trim().toUpperCase();
-  const ra = SIZE_RANK[na], rb = SIZE_RANK[nb];
-  if (ra !== undefined && rb !== undefined) return ra - rb;
-  if (ra !== undefined) return -1;               // known garment sizes first
-  if (rb !== undefined) return 1;
-  return na.localeCompare(nb, "th", { numeric: true }); // numeric / other (e.g. 40/2, 5นิ้ว)
-};
-// Sort variants within a type: color → code → size.
-const compareVariants = (a: Accessory, b: Accessory): number =>
-  (a.color || "").localeCompare(b.color || "", "th") ||
-  (a.acc_code || "").localeCompare(b.acc_code || "", undefined, { numeric: true }) ||
-  compareSize(a.size, b.size);
 
 export default function TransactionsPage() {
   const router = useRouter();
@@ -89,7 +69,8 @@ export default function TransactionsPage() {
       i.size.toLowerCase().includes(q)
     );
   };
-  const filtered = items.filter(matchSearch);
+  // type → color → size, memoized (can be the full catalog).
+  const filtered = useMemo(() => items.filter(matchSearch).sort(compareAccessory), [items, search]);
 
   const searching = search.trim().length > 0;
   // Global (cross-type) search only applies at the top level. Once drilled into
@@ -111,10 +92,11 @@ export default function TransactionsPage() {
   })();
 
   // Variants of the chosen type (second drilldown step), filtered by the search
-  // box so search is scoped to the selected type.
-  const variantsOfType = selectedType
-    ? items.filter((i) => i.type === selectedType && matchSearch(i)).sort(compareVariants)
-    : [];
+  // box so search is scoped to the selected type. Sorted color → size (same type).
+  const variantsOfType = useMemo(
+    () => selectedType ? items.filter((i) => i.type === selectedType && matchSearch(i)).sort(compareAccessory) : [],
+    [items, selectedType, search]
+  );
 
   // Both lists can run into the thousands (e.g. ด้าย / ยาง), so page them —
   // rendering every match at once locks the main thread and freezes the page.

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, overwriteStock, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { compareAccessory } from "@/lib/sort";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -224,7 +225,7 @@ export default function ManagePage() {
   const refresh = () => Promise.all([getAccessories(), getLotMap()]).then(([a, lm]) => { setItems(a); setLotMap(lm); });
   const types   = Array.from(new Set(items.map((i) => i.type))).sort();
 
-  const filtered = items.filter((i) => {
+  const filtered = useMemo(() => items.filter((i) => {
     if (!showInactive && !i.is_active) return false;
     if (filterType && i.type !== filterType) return false;
     if (!search) return true;
@@ -238,7 +239,7 @@ export default function ManagePage() {
       i.size.toLowerCase().includes(q) ||
       supName.includes(q)
     );
-  });
+  }).sort(compareAccessory), [items, suppliers, search, filterType, showInactive]);
 
   const pg = usePagination(filtered, `${search}|${filterType}|${showInactive}`);
 

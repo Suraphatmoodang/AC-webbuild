@@ -169,14 +169,14 @@ tr:hover td { background: var(--bg3); }
 /* Transactions page on tablets/phones, by orientation:
    - landscape → keep picker + form side-by-side using the whole screen
      (slimmer form column so the picker table keeps room)
-   - portrait  → stack, with the entry FORM on top and the picker below */
+   - portrait  → stack, with the picker TABLE on top and the entry form below */
 @media (max-width: 1024px) and (orientation: landscape) {
   .tx-grid { grid-template-columns: 1fr 320px; gap: 14px; }
 }
 @media (max-width: 1024px) and (orientation: portrait) {
   .tx-grid { grid-template-columns: 1fr; }
-  .tx-grid > div:first-child { order: 2; }
-  .tx-grid > div:last-child  { order: 1; }
+  .tx-grid > div:first-child { order: 1; }
+  .tx-grid > div:last-child  { order: 2; }
 }
 
 /* Small tablets / large phones: stat cards 2-up, header wraps so the

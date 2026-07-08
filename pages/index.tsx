@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, getSuppliers, stageAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Supplier, type ImportRow, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { compareAccessory } from "@/lib/sort";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -51,7 +52,7 @@ export default function StockPage() {
   const lotsOf = (id: string) => (lotMap.get(id) ?? []).filter((l) => Number(l.quantity_remaining) > 0);
   const types = Array.from(new Set(items.map((i) => i.type))).sort();
 
-  const filtered = items.filter((i) => {
+  const filtered = useMemo(() => items.filter((i) => {
     if (showLow && stockOf(i.id) > i.min_quantity) return false;
     if (filterType && i.type !== filterType) return false;
     if (!search) return true;
@@ -63,7 +64,7 @@ export default function StockPage() {
       i.color.toLowerCase().includes(q) ||
       i.size.toLowerCase().includes(q)
     );
-  });
+  }).sort(compareAccessory), [items, lotMap, search, filterType, showLow]);
 
   const totalValue = items.reduce((s, i) => s + valueOf(i.id), 0);
   const lowCount = items.filter((i) => stockOf(i.id) <= Number(i.min_quantity)).length;
