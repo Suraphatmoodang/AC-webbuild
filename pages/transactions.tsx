@@ -13,6 +13,27 @@ const TX_LABELS: Record<TxType, { th: string; en: string }> = {
   RETURN: { th: "คืนสต็อค", en: "Return"  },
 };
 
+// Ordering of garment sizes (smallest → largest). "XXL" and "2XL" are treated
+// as equal rank since the data uses both interchangeably.
+const SIZE_RANK: Record<string, number> = {
+  XXS: 0, "2XS": 1, XS: 2, S: 3, M: 4, L: 5, XL: 6,
+  XXL: 7, "2XL": 7, XXXL: 8, "3XL": 8, "4XL": 9, "5XL": 10,
+  "6XL": 11, "7XL": 12, "8XL": 13, "9XL": 14, "10XL": 15,
+};
+const compareSize = (a: string, b: string): number => {
+  const na = (a || "").trim().toUpperCase(), nb = (b || "").trim().toUpperCase();
+  const ra = SIZE_RANK[na], rb = SIZE_RANK[nb];
+  if (ra !== undefined && rb !== undefined) return ra - rb;
+  if (ra !== undefined) return -1;               // known garment sizes first
+  if (rb !== undefined) return 1;
+  return na.localeCompare(nb, "th", { numeric: true }); // numeric / other (e.g. 40/2, 5นิ้ว)
+};
+// Sort variants within a type: color → code → size.
+const compareVariants = (a: Accessory, b: Accessory): number =>
+  (a.color || "").localeCompare(b.color || "", "th") ||
+  (a.acc_code || "").localeCompare(b.acc_code || "", undefined, { numeric: true }) ||
+  compareSize(a.size, b.size);
+
 export default function TransactionsPage() {
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
@@ -57,7 +78,7 @@ export default function TransactionsPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const filtered = items.filter((i) => {
+  const matchSearch = (i: Accessory) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -67,9 +88,13 @@ export default function TransactionsPage() {
       i.color.toLowerCase().includes(q) ||
       i.size.toLowerCase().includes(q)
     );
-  });
+  };
+  const filtered = items.filter(matchSearch);
 
   const searching = search.trim().length > 0;
+  // Global (cross-type) search only applies at the top level. Once drilled into
+  // a type, the search box filters within that type's variants instead.
+  const globalSearch = searching && !selectedType;
 
   // Build the list of types with item counts (for the first drilldown step)
   const typeGroups = (() => {
@@ -85,15 +110,16 @@ export default function TransactionsPage() {
       .sort((a, b) => a.type.localeCompare(b.type, "th"));
   })();
 
-  // Variants belonging to the chosen type (for the second drilldown step)
+  // Variants of the chosen type (second drilldown step), filtered by the search
+  // box so search is scoped to the selected type.
   const variantsOfType = selectedType
-    ? items.filter((i) => i.type === selectedType)
+    ? items.filter((i) => i.type === selectedType && matchSearch(i)).sort(compareVariants)
     : [];
 
   // Both lists can run into the thousands (e.g. ด้าย / ยาง), so page them —
   // rendering every match at once locks the main thread and freezes the page.
   const searchPg = usePagination(filtered, `search|${search}`);
-  const variantPg = usePagination(variantsOfType, `type|${selectedType ?? ""}`);
+  const variantPg = usePagination(variantsOfType, `type|${selectedType ?? ""}|${search}`);
 
   const handleSubmit = async () => {
     if (!selected) return;
@@ -149,13 +175,13 @@ export default function TransactionsPage() {
       {/* Item picker */}
       <div>
         <div style={{ marginBottom: 12 }}>
-          <SearchInput value={search} onChange={(v) => { setSearch(v); if (v.trim()) setSelectedType(null); }} placeholder="ค้นหาอุปกรณ์ที่ต้องการบันทึก…" />
+          <SearchInput value={search} onChange={setSearch} placeholder={selectedType ? `ค้นหาใน ${selectedType}…` : "ค้นหาอุปกรณ์ที่ต้องการบันทึก…"} />
         </div>
 
-        {/* Breadcrumb / back bar — only when drilled into a type and not searching */}
-        {!searching && selectedType && (
+        {/* Breadcrumb / back bar — whenever drilled into a type (incl. while searching within it) */}
+        {selectedType && (
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => setSelectedType(null)} style={{ padding: "6px 12px", fontSize: 15 }}>
+            <button onClick={() => { setSelectedType(null); setSearch(""); }} style={{ padding: "6px 12px", fontSize: 15 }}>
               ← ประเภททั้งหมด
             </button>
             <span style={{ fontSize: 16, color: "var(--text2)" }}>
@@ -167,19 +193,19 @@ export default function TransactionsPage() {
         <div className="card" style={{ overflow: "hidden" }}>
           {loading ? (
             <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>กำลังโหลด…</div>
-          ) : searching ? (
-            /* ── SEARCH MODE: flat results across everything ── */
+          ) : globalSearch ? (
+            /* ── GLOBAL SEARCH (no type selected): flat results across everything ── */
             <>
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
               <table>
                 <thead>
                   <tr>
-                    <th>ประเภท / รายละเอียด</th><th>สี / ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>ประเภท / รายละเอียด</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 && (
-                    <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
+                    <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                   )}
                   {searchPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
@@ -191,10 +217,10 @@ export default function TransactionsPage() {
                           <div style={{ fontWeight: 500, fontSize: 17 }}>{item.type}</div>
                           <div style={{ fontSize: 14, color: "var(--text2)" }}>{item.description}{item.acc_code ? ` · ${item.acc_code}` : ""}</div>
                         </td>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
-                          {item.color && <div>{item.color}</div>}
-                          {item.size  && <div>{item.size}</div>}
-                          {item.row   && <div style={{ color: "var(--text3)" }}>แถว {item.row}</div>}
+                          {item.size || (item.row ? "" : "—")}
+                          {item.row && <div style={{ color: "var(--text3)", fontSize: 13 }}>แถว {item.row}</div>}
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
@@ -245,12 +271,12 @@ export default function TransactionsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>รายละเอียด</th><th>สี / ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {variantsOfType.length === 0 && (
-                    <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
+                    <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
                   )}
                   {variantPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
@@ -262,11 +288,10 @@ export default function TransactionsPage() {
                           <div style={{ fontWeight: 500, fontSize: 16 }}>{item.description || "—"}</div>
                           {item.acc_code && <div style={{ fontSize: 14, color: "var(--text3)" }}>{item.acc_code}</div>}
                         </td>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
-                          {item.color && <div>{item.color}</div>}
-                          {item.size  && <div>{item.size}</div>}
-                          {item.row   && <div style={{ color: "var(--text3)" }}>แถว {item.row}</div>}
-                          {!item.color && !item.size && !item.row && <span style={{ color: "var(--text3)" }}>—</span>}
+                          {item.size || (item.row ? "" : "—")}
+                          {item.row && <div style={{ color: "var(--text3)", fontSize: 13 }}>แถว {item.row}</div>}
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>

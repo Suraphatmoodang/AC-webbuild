@@ -664,6 +664,32 @@ export async function createLot(input: {
   return data;
 }
 
+// Overwrite an accessory's total stock: wipe every existing lot and (when
+// quantity > 0) create a single opening lot at `unit_cost`. Mirrors the bulk
+// updater's quantity path (applyStockUpdates). Used by the manage page's
+// stock edit. NOTE: this replaces the item's lot layering / price history.
+export async function overwriteStock(
+  accessory_id: string,
+  quantity: number,
+  unit_cost: number
+): Promise<void> {
+  const { error: delErr } = await supabase.from("accessory_lots").delete().eq("accessory_id", accessory_id);
+  if (delErr) throw delErr;
+  if (quantity > 0) {
+    const { error: lotErr } = await supabase.from("accessory_lots").insert({
+      accessory_id,
+      quantity_received: quantity,
+      quantity_remaining: quantity,
+      unit_cost,
+      source: "MIGRATION",
+      note: "แก้ไขสต็อก (เขียนทับ)",
+    });
+    if (lotErr) throw lotErr;
+  }
+  const { error: mirErr } = await supabase.from("accessories").update({ quantity }).eq("id", accessory_id);
+  if (mirErr) throw mirErr;
+}
+
 // Consume `qty` from an accessory's lots in FIFO or LIFO order.
 // Throws if insufficient stock. Optionally restrict to a single lot (lotId).
 // Returns the lots touched with amounts consumed (for optional cost tracking later).

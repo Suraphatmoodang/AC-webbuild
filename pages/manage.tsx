@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, type Accessory, type Supplier, type Lot } from "@/lib/store";
+import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, overwriteStock, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -138,6 +138,43 @@ function SupplierCombobox({ value, onChange, options }: {
   );
 }
 
+// Editable stock + price for the edit modal. Changing the stock and saving
+// OVERWRITES the item's lots with one new opening lot at this price (see
+// overwriteStock in the store). Rendered only when stock-editing is enabled —
+// a future separate-auth page will gate this via the `stockEditEnabled` flag.
+function StockEditor({ currentStock, quantity, unitCost, unit, onQuantity, onUnitCost, error }: {
+  currentStock: number;
+  quantity: number;
+  unitCost: number;
+  unit: string;
+  onQuantity: (v: number) => void;
+  onUnitCost: (v: number) => void;
+  error?: string;
+}) {
+  const changed = quantity !== currentStock;
+  return (
+    <div className="form-row form-grid form-grid-2">
+      <div>
+        <label className="form-label">ราคาซื้อ/หน่วย (฿)</label>
+        <input type="number" step="0.0001" value={unitCost}
+          onChange={(e) => onUnitCost(parseFloat(e.target.value) || 0)} />
+      </div>
+      <div>
+        <label className="form-label">สต็อค (เขียนทับ)</label>
+        <input type="number" value={quantity}
+          onChange={(e) => onQuantity(parseFloat(e.target.value) || 0)}
+          style={error ? { borderColor: "var(--red)" } : {}} />
+        {error && <div style={{ fontSize: 11, color: "var(--red)", marginTop: 3 }}>{error}</div>}
+        {changed && !error && (
+          <div style={{ fontSize: 11, color: "var(--accent)", marginTop: 3 }}>
+            จะลบล็อตเดิมทั้งหมดและสร้างล็อตใหม่ {quantity.toLocaleString()} {unit} ที่ ฿{Number(unitCost).toFixed(2)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ManagePage() {
   const router = useRouter();
   const [authed, setAuthed]   = useState(false);
@@ -157,6 +194,11 @@ export default function ManagePage() {
   const [bulkModal, setBulkModal] = useState<null | { blocked: string[] }>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  // Gate for in-place stock editing (overwrite → new lot). Hard-enabled for now;
+  // a separate admin-auth page will drive this later. Flip to false to restore
+  // the read-only price-history view in the edit modal.
+  const stockEditEnabled = true;
 
   // Auth gate
   useEffect(() => {
@@ -250,9 +292,12 @@ export default function ManagePage() {
   const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
   const openEdit = (item: Accessory) => {
     setEditId(item.id);
+    // Stock lives in lots — seed the editable field from the lot-derived total
+    // (what the table shows), not the accessory's mirror column.
+    const curStock = stockFromLots(lotMap.get(item.id) ?? []);
     setForm({
       type: item.type, acc_code: item.acc_code, description: item.description,
-      row: item.row, color: item.color, size: item.size, quantity: item.quantity,
+      row: item.row, color: item.color, size: item.size, quantity: curStock,
       unit: item.unit, unit_cost: item.unit_cost, min_quantity: item.min_quantity,
       supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo", is_active: item.is_active ?? true,
     });
@@ -267,6 +312,14 @@ export default function ManagePage() {
     try {
       if (editId) {
         await updateAccessory(editId, form);
+        // Overwrite stock: if the quantity was changed, rebuild the item's lots
+        // as a single opening lot at the entry's price (see overwriteStock).
+        if (stockEditEnabled) {
+          const curStock = stockFromLots(lotMap.get(editId) ?? []);
+          if (Number(form.quantity) !== curStock) {
+            await overwriteStock(editId, Number(form.quantity), Number(form.unit_cost) || 0);
+          }
+        }
         showToast("อัพเดตแล้ว ✓", "success");
       } else {
         const created = await addAccessory(form);
@@ -480,9 +533,21 @@ export default function ManagePage() {
                   </div>
                 </div>
               ) : (
-                /* EDIT: stock & price come from lots — NOT editable here (editing the accessory
-                   row's price/qty does not touch lots). Show read-only totals + price history. */
-                (() => {
+                /* EDIT: when stock-editing is enabled, an editable stock+price field that
+                   OVERWRITES the lots on save; always followed by the lot / price history. */
+                <>
+                {stockEditEnabled && (
+                  <StockEditor
+                    currentStock={stockFromLots(lotMap.get(editId) ?? [])}
+                    quantity={form.quantity}
+                    unitCost={form.unit_cost}
+                    unit={form.unit}
+                    onQuantity={(v) => f("quantity", v)}
+                    onUnitCost={(v) => f("unit_cost", v)}
+                    error={formErrors.quantity}
+                  />
+                )}
+                {(() => {
                   const lots = lotMap.get(editId) ?? [];
                   const stock = stockFromLots(lots);
                   const value = valueFromLots(lots);
@@ -503,7 +568,9 @@ export default function ManagePage() {
                         </div>
                       </div>
                       <div style={{ fontSize:12, color:"var(--text3)", marginBottom:4 }}>
-                        ประวัติราคา / การรับเข้า — แก้สต็อกหรือราคาผ่านหน้า “บันทึกรายการ” (รับเข้า) เท่านั้น
+                        {stockEditEnabled
+                          ? "ประวัติราคา / การรับเข้า (การแก้สต็อกด้านบนจะเขียนทับประวัตินี้)"
+                          : "ประวัติราคา / การรับเข้า — แก้สต็อกหรือราคาผ่านหน้า “บันทึกรายการ” (รับเข้า) เท่านั้น"}
                       </div>
                       {history.length === 0 ? (
                         <div style={{ fontSize:14, color:"var(--text3)", padding:"6px 0" }}>ยังไม่มีล็อต (ยังไม่มีการรับเข้า)</div>
@@ -524,7 +591,8 @@ export default function ManagePage() {
                       )}
                     </div>
                   );
-                })()
+                })()}
+                </>
               )}
 
               {/* is_active toggle */}
