@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addTransaction, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot } from "@/lib/store";
+import { getAccessories, addTransaction, revertTransaction, getTransactionsByAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot, type Transaction } from "@/lib/store";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { compareAccessory } from "@/lib/sort";
@@ -13,6 +13,40 @@ const TX_LABELS: Record<TxType, { th: string; en: string }> = {
   ADJUST: { th: "ปรับยอด",  en: "Adjust"  },
   RETURN: { th: "คืนสต็อค", en: "Return"  },
 };
+
+// Toggleable "revert last transaction" affordance — scaffolding for undoing a
+// mistaken entry. Gated by `txRevertEnabled` below (off until revertTransaction is
+// implemented in the store). Same gate pattern as manage's StockEditor.
+function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert: () => void }) {
+  return (
+    <button onClick={onRevert} disabled={disabled}
+      style={{ width: "100%", marginTop: 8, padding: "9px", fontSize: 15, color: "var(--red)", borderColor: "var(--red2)" }}>
+      ↺ ย้อนรายการล่าสุด
+    </button>
+  );
+}
+
+// Who recorded the transaction. Currently ONE fixed user, but structured so it can
+// later become a dropdown (extend RECORDERS) or a free-text field — flip
+// `recorderPickerEnabled` to true. Same gate pattern as StockEditor / txRevert.
+const RECORDERS = ["เดือน"];             // roster of possible recorders (currently one)
+const recorderPickerEnabled = false;     // false → fixed read-only; true → dropdown
+
+function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  if (!recorderPickerEnabled) {
+    return (
+      <div style={{ padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: "var(--r)", color: "var(--text2)" }}>
+        {value}
+      </div>
+    );
+  }
+  // Future: pick from the roster. Swap this <select> for an <input> for free text.
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      {RECORDERS.map((r) => <option key={r} value={r}>{r}</option>)}
+    </select>
+  );
+}
 
 export default function TransactionsPage() {
   const router = useRouter();
@@ -32,7 +66,8 @@ export default function TransactionsPage() {
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split("T")[0]);
   const [refNo, setRefNo] = useState("");
   const [note, setNote] = useState("");
-  const [by, setBy] = useState("");
+  // Recorder for "ผู้บันทึก" — fixed to the single user for now (see RecordedByField).
+  const [by, setBy] = useState(RECORDERS[0]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -56,6 +91,38 @@ export default function TransactionsPage() {
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  // Gate for the "revert last transaction" feature. A future admin-auth page will
+  // drive this (same pattern as manage's stockEditEnabled). Flip to false to hide.
+  const txRevertEnabled = true;
+  const [revertTx, setRevertTx] = useState<Transaction | null>(null); // pending confirm
+  const [reverting, setReverting] = useState(false);
+
+  // Open the confirm modal for the latest transaction of the selected item.
+  const handleRevertLast = async () => {
+    if (!selected) { showToast("เลือกอุปกรณ์ก่อน", "error"); return; }
+    try {
+      const txs = await getTransactionsByAccessory(selected.id); // ascending
+      const latest = txs[txs.length - 1];
+      if (!latest) { showToast("ไม่มีรายการให้ย้อนสำหรับอุปกรณ์นี้", "error"); return; }
+      setRevertTx(latest);
+    } catch (e: any) {
+      showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
+    }
+  };
+
+  const confirmRevert = async () => {
+    if (!revertTx) return;
+    setReverting(true);
+    const res = await revertTransaction(revertTx.id);
+    setReverting(false);
+    if ("error" in res) { showToast(res.error, "error"); return; }
+    setRevertTx(null);
+    const [fresh, lm] = await Promise.all([getAccessories(), getLotMap()]);
+    setItems(fresh); setLotMap(lm);
+    setSelected(fresh.find((a) => a.id === selected?.id) ?? null);
+    showToast("ย้อนรายการล่าสุดแล้ว ✓", "success");
   };
 
   const matchSearch = (i: Accessory) => {
@@ -422,7 +489,7 @@ export default function TransactionsPage() {
           </div>
           <div className="form-row">
             <label className="form-label">ผู้บันทึก · Created by</label>
-            <input placeholder="ชื่อ…" value={by} onChange={(e) => setBy(e.target.value)} />
+            <RecordedByField value={by} onChange={setBy} />
           </div>
 
           {selected && (
@@ -447,8 +514,42 @@ export default function TransactionsPage() {
             onClick={handleSubmit} disabled={!selected || saving}>
             {saving ? "กำลังบันทึก…" : "บันทึกรายการ"}
           </button>
+
+          {txRevertEnabled && <RevertLastButton disabled={saving || !selected} onRevert={handleRevertLast} />}
         </div>
       </div>
+
+      {/* Revert-last-transaction confirmation */}
+      {revertTx && (
+        <div className="modal-overlay" onClick={() => setRevertTx(null)}>
+          <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight: 500, color: "var(--red)" }}>ย้อนรายการล่าสุด</div>
+              <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setRevertTx(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: "var(--text2)" }}>
+                จะย้อน (ยกเลิก) รายการล่าสุดของ <strong style={{ color: "var(--text)" }}>{selected?.type} {selected?.description}</strong>:
+              </p>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: "var(--bg3)", borderRadius: "var(--r)", margin: "10px 0", fontSize: 15 }}>
+                <span><strong>{TX_LABELS[revertTx.transaction_type].th}</strong> · {Math.abs(Number(revertTx.quantity)).toLocaleString()}</span>
+                <span style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>
+                  {new Date(revertTx.created_at).toLocaleDateString("th-TH")} {new Date(revertTx.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+              <p style={{ fontSize: 14, color: "var(--text3)" }}>
+                ล็อตจะถูกคืนสู่สภาพก่อนรายการนี้ และรายการนี้จะถูกลบออกจากประวัติ — ย้อนได้เฉพาะรายการล่าสุดของอุปกรณ์นี้เท่านั้น
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setRevertTx(null)}>ยกเลิก</button>
+              <button className="danger" onClick={confirmRevert} disabled={reverting}>
+                {reverting ? "กำลังย้อน…" : "ยืนยันการย้อน"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>

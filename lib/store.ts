@@ -60,6 +60,13 @@ export type ImportRow = {
   approved_at: string | null;
 };
 
+// What a transaction did to lots, recorded at write time so it can be replayed in
+// reverse by revertTransaction (exact undo). See addTransaction / revertTransaction.
+export type LotEffect =
+  | { op: "create"; lot_id: string; quantity: number }                       // IN / RETURN: created this lot
+  | { op: "consume"; lots: { lot_id: string; consumed: number }[] }          // OUT: drew these amounts from these lots
+  | { op: "adjust"; lot_id: string; before: number; after: number };         // ADJUST: set this lot's remaining
+
 export type Transaction = {
   id: string;
   accessory_id: string;
@@ -71,6 +78,7 @@ export type Transaction = {
   note: string;
   created_by: string;
   created_at: string;
+  lot_effects?: LotEffect | null;   // null on rows written before the feature/migration
 };
 
 export type Supplier = {
@@ -249,6 +257,7 @@ export async function addTransaction(opts: {
     const lotsBefore = await getLots(accessory_id);
     const before = stockFromLots(lotsBefore);
     let txQty = qty;
+    let effect: LotEffect | null = null;   // recorded so the tx can be reverted exactly
 
     if (type === "IN" || type === "RETURN") {
       // Determine effective_date for queue positioning
@@ -261,34 +270,100 @@ export async function addTransaction(opts: {
           effective = new Date(opts.return_date).toISOString();
         } // "back" or default → now (newest)
       }
-      await createLot({
+      const newLot = await createLot({
         accessory_id, quantity: qty, unit_cost: opts.unit_cost ?? 0,
         effective_date: effective, source: type === "RETURN" ? "RETURN" : "IN",
         note: opts.note ?? "",
       });
+      effect = { op: "create", lot_id: newLot.id, quantity: qty };
       txQty = qty;
     } else if (type === "OUT") {
-      await consumeStock(accessory_id, qty, method, opts.lot_id);
+      const touched = await consumeStock(accessory_id, qty, method, opts.lot_id);
+      effect = { op: "consume", lots: touched.map((t) => ({ lot_id: t.lot_id, consumed: t.consumed })) };
       txQty = qty;
     } else if (type === "ADJUST") {
       if (!opts.lot_id) return { error: "กรุณาเลือกล็อตที่ต้องการปรับ" };
       const target = lotsBefore.find((l) => l.id === opts.lot_id);
       if (!target) return { error: "ไม่พบล็อต" };
       txQty = qty - Number(target.quantity_remaining);
+      effect = { op: "adjust", lot_id: opts.lot_id, before: Number(target.quantity_remaining), after: qty };
       await adjustLot(opts.lot_id, qty);
     }
 
     const lotsAfter = await getLots(accessory_id);
     const after = stockFromLots(lotsAfter);
 
-    const { error: txErr } = await supabase
-      .from("accessory_transactions")
-      .insert({ accessory_id, transaction_type: type, quantity: txQty,
-        quantity_before: before, quantity_after: after,
-        reference_no: opts.reference_no ?? "", note: opts.note ?? "", created_by: opts.created_by ?? "" });
+    const payload = { accessory_id, transaction_type: type, quantity: txQty,
+      quantity_before: before, quantity_after: after,
+      reference_no: opts.reference_no ?? "", note: opts.note ?? "", created_by: opts.created_by ?? "",
+      lot_effects: effect };
+    let { error: txErr } = await supabase.from("accessory_transactions").insert(payload);
+    // Graceful fallback: if the lot_effects column hasn't been migrated yet, still
+    // record the transaction (it just won't be revertible). Prevents the missing
+    // column from breaking all transaction recording.
+    if (txErr && /lot_effects/i.test(txErr.message)) {
+      const { lot_effects, ...rest } = payload;
+      ({ error: txErr } = await supabase.from("accessory_transactions").insert(rest));
+    }
     if (txErr) return { error: txErr.message };
 
     return { ok: true, before, after };
+  } catch (e: any) {
+    return { error: e.message ?? "เกิดข้อผิดพลาด" };
+  }
+}
+
+// Revert a transaction — exact undo (approach "a"): replay its recorded `lot_effects`
+// in reverse, then delete the transaction row. LATEST-ONLY: allowed only when this is
+// the most recent transaction for its accessory, which guarantees no later movement
+// has touched the lots it affected (so the reversal is exact and safe).
+//   create (IN/RETURN)  → delete the lot it created
+//   consume (OUT)        → add each consumed amount back to its lot
+//   adjust (ADJUST)      → set the lot's remaining back to `before`
+export async function revertTransaction(
+  transactionId: string
+): Promise<{ ok: true } | { error: string }> {
+  try {
+    const { data: tx, error: txErr } = await supabase
+      .from("accessory_transactions").select("*").eq("id", transactionId).single();
+    if (txErr || !tx) return { error: "ไม่พบรายการ" };
+
+    // Must be the latest transaction for this accessory.
+    const { data: latest } = await supabase
+      .from("accessory_transactions").select("id")
+      .eq("accessory_id", tx.accessory_id)
+      .order("created_at", { ascending: false }).limit(1).single();
+    if (!latest || latest.id !== tx.id) {
+      return { error: "ย้อนได้เฉพาะรายการล่าสุดของอุปกรณ์นี้" };
+    }
+
+    const effect = tx.lot_effects as LotEffect | null | undefined;
+    if (!effect) return { error: "รายการนี้ไม่มีข้อมูลล็อตสำหรับย้อน (บันทึกก่อนเปิดฟีเจอร์)" };
+
+    if (effect.op === "create") {
+      const { error } = await supabase.from("accessory_lots").delete().eq("id", effect.lot_id);
+      if (error) throw error;
+    } else if (effect.op === "consume") {
+      for (const e of effect.lots) {
+        const { data: lot, error: getErr } = await supabase
+          .from("accessory_lots").select("quantity_remaining").eq("id", e.lot_id).single();
+        if (getErr) throw getErr;
+        if (!lot) continue; // lot gone (shouldn't happen for the latest tx) — skip
+        const { error } = await supabase.from("accessory_lots")
+          .update({ quantity_remaining: Number(lot.quantity_remaining) + e.consumed })
+          .eq("id", e.lot_id);
+        if (error) throw error;
+      }
+    } else if (effect.op === "adjust") {
+      const { error } = await supabase.from("accessory_lots")
+        .update({ quantity_remaining: effect.before }).eq("id", effect.lot_id);
+      if (error) throw error;
+    }
+
+    const { error: delErr } = await supabase.from("accessory_transactions").delete().eq("id", tx.id);
+    if (delErr) throw delErr;
+
+    return { ok: true };
   } catch (e: any) {
     return { error: e.message ?? "เกิดข้อผิดพลาด" };
   }
