@@ -29,7 +29,7 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
 // Who recorded the transaction. Currently ONE fixed user, but structured so it can
 // later become a dropdown (extend RECORDERS) or a free-text field — flip
 // `recorderPickerEnabled` to true. Same gate pattern as StockEditor / txRevert.
-const RECORDERS = ["เดือน"];             // roster of possible recorders (currently one)
+const RECORDERS = ["เตือน"];             // roster of possible recorders (currently one)
 const recorderPickerEnabled = false;     // false → fixed read-only; true → dropdown
 
 function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
