@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getApprovedImports, getTransactions, getAccessories, getSuppliers, getLotMap, valueFromLots,
-  type ImportRow, type Transaction, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { useRequireRole } from "@/lib/auth";
+import { getApprovedFabricImports, getFabricTransactions, getFabrics, getSuppliers,
+  getFabricLotMap, valueFromLots,
+  type FabricImportRow, type FabricTransaction, type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -10,9 +11,9 @@ type LogEvent = {
   id: string;
   kind: "added" | "transaction";
   at: string;
-  label: string;        // item description
-  detail: string;       // extra info (qty, supplier, ref)
-  txType?: Transaction["transaction_type"];
+  label: string;        // fabric name
+  detail: string;       // extra info (qty, variant, ref)
+  txType?: FabricTransaction["transaction_type"];
 };
 
 const TX_LABELS: Record<string, { th: string; cls: string }> = {
@@ -22,30 +23,30 @@ const TX_LABELS: Record<string, { th: string; cls: string }> = {
   RETURN: { th: "คืนสต็อค", cls: "badge-return"  },
 };
 
-export default function AdminLogPage() {
+export default function FabricAdminLogPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [approved, setApproved] = useState<ImportRow[]>([]);
-  const [txns, setTxns] = useState<Transaction[]>([]);
-  const [accs, setAccs] = useState<Accessory[]>([]);
+  const [approved, setApproved] = useState<FabricImportRow[]>([]);
+  const [txns, setTxns] = useState<FabricTransaction[]>([]);
+  const [fabs, setFabs] = useState<Fabric[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
+  const [lotMap, setLotMap] = useState<Map<string, FabricLot[]>>(new Map());
 
   // filters
   const [kindFilter, setKindFilter] = useState<"all" | "added" | "transaction">("all");
   const [txFilter, setTxFilter] = useState<"all" | "IN" | "OUT" | "ADJUST" | "RETURN">("all");
   const [search, setSearch] = useState("");
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireRole("fabric");
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([getApprovedImports(), getTransactions(), getAccessories(), getSuppliers(), getLotMap()])
-      .then(([imp, tx, ac, su, lm]) => { setApproved(imp); setTxns(tx); setAccs(ac); setSuppliers(su); setLotMap(lm); })
+    Promise.all([getApprovedFabricImports(), getFabricTransactions(), getFabrics(), getSuppliers(), getFabricLotMap()])
+      .then(([imp, tx, fa, su, lm]) => { setApproved(imp); setTxns(tx); setFabs(fa); setSuppliers(su); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, [authed]);
 
-  const accMap = Object.fromEntries(accs.map((a) => [a.id, a]));
+  const fabMap = Object.fromEntries(fabs.map((f) => [f.id, f]));
 
   // Build unified log
   const events: LogEvent[] = [
@@ -53,17 +54,17 @@ export default function AdminLogPage() {
       id: "add-" + r.id,
       kind: "added",
       at: r.approved_at ?? r.created_at,
-      label: `${r.type} ${r.description}`.trim(),
-      detail: [r.color, r.size, r.acc_code].filter(Boolean).join(" · ") || "—",
+      label: r.fabric_type.trim(),
+      detail: [r.color, r.width, r.fabric_code && `#${r.fabric_code}`].filter(Boolean).join(" · ") || "—",
     })),
     ...txns.map((t): LogEvent => {
-      const a = accMap[t.accessory_id];
+      const f = fabMap[t.fabric_id];
       return {
         id: "tx-" + t.id,
         kind: "transaction",
         at: t.created_at,
-        label: a ? `${a.type} ${a.description}`.trim() : "(ลบแล้ว)",
-        detail: `${Math.abs(Number(t.quantity)).toLocaleString()} ${a?.unit ?? ""}${t.reference_no ? " · " + t.reference_no : ""}`,
+        label: f ? f.fabric_type : "(ลบแล้ว)",
+        detail: `${Math.abs(Number(t.quantity)).toLocaleString()} ${f?.unit ?? ""}${t.reference_no ? " · " + t.reference_no : ""}`,
         txType: t.transaction_type,
       };
     }),
@@ -82,16 +83,16 @@ export default function AdminLogPage() {
   const pg = usePagination(filteredEvents, `${kindFilter}|${txFilter}|${search}`);
 
   // ── Summary totals ──
-  const totalValue = accs.reduce((s, a) => s + valueFromLots(lotMap.get(a.id) ?? []), 0);
+  const totalValue = fabs.reduce((s, f) => s + valueFromLots(lotMap.get(f.id) ?? []), 0);
   const totalIn = txns.filter((t) => t.transaction_type === "IN" || t.transaction_type === "RETURN")
     .reduce((s, t) => s + Math.abs(Number(t.quantity)), 0);
   const totalOut = txns.filter((t) => t.transaction_type === "OUT")
     .reduce((s, t) => s + Math.abs(Number(t.quantity)), 0);
 
   const summary = [
-    { label: "อุปกรณ์ทั้งหมด", val: accs.length.toLocaleString(), en: "Accessories" },
+    { label: "ผ้าทั้งหมด", val: fabs.length.toLocaleString(), en: "Fabrics" },
     { label: "ซัพพลายเออร์", val: suppliers.length.toLocaleString(), en: "Suppliers" },
-    { label: "ประเภท", val: new Set(accs.map((a) => a.type)).size.toLocaleString(), en: "Types" },
+    { label: "ชนิดผ้า", val: new Set(fabs.map((f) => f.fabric_type)).size.toLocaleString(), en: "Fabric types" },
     { label: "มูลค่าสต็อครวม", val: "฿" + totalValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), en: "Stock value", mono: true },
     { label: "เพิ่มเข้าระบบ", val: approved.length.toLocaleString(), en: "Added (approved)" },
     { label: "ธุรกรรมทั้งหมด", val: txns.length.toLocaleString(), en: "Transactions" },
@@ -103,7 +104,7 @@ export default function AdminLogPage() {
 
   return (
     <div>
-      <h2 style={{ fontSize: 22, fontWeight: 500, marginBottom: 16 }}>สรุปและบันทึกกิจกรรม</h2>
+      <h2 style={{ fontSize: 22, fontWeight: 500, marginBottom: 16 }}>สรุปและบันทึกกิจกรรม — ผ้า</h2>
 
       {/* Summary cards */}
       <div className="stat-grid" style={{ marginBottom: 28 }}>
@@ -148,7 +149,7 @@ export default function AdminLogPage() {
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{ whiteSpace: "nowrap" }}>วันที่</th><th style={{ whiteSpace: "nowrap" }}>ประเภท</th><th style={{ whiteSpace: "nowrap" }}>อุปกรณ์</th><th style={{ whiteSpace: "nowrap" }}>รายละเอียด</th>
+                  <th style={{ whiteSpace: "nowrap" }}>วันที่</th><th style={{ whiteSpace: "nowrap" }}>ประเภท</th><th style={{ whiteSpace: "nowrap" }}>ผ้า</th><th style={{ whiteSpace: "nowrap" }}>รายละเอียด</th>
                 </tr>
               </thead>
               <tbody>

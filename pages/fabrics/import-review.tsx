@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { getPendingImports, approveImports, rejectImports, getDuplicateMap, getSuppliers, updateImportRow,
-  type ImportRow, type Accessory, type Supplier } from "@/lib/store";
 import { useRequireRole } from "@/lib/auth";
+import { getPendingFabricImports, approveFabricImports, rejectFabricImports, getFabricDuplicateMap,
+  getSuppliers, updateFabricImportRow,
+  type FabricImportRow, type Fabric, type Supplier } from "@/lib/fabric-store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
 
 const PAGE_SIZES = [100, 250, 500];
 
-export default function ImportReviewPage() {
+export default function FabricImportReviewPage() {
   const router = useRouter();
-  const [rows, setRows] = useState<ImportRow[]>([]);
-  const [dupMap, setDupMap] = useState<Map<string, Accessory[]>>(new Map());
+  const [rows, setRows] = useState<FabricImportRow[]>([]);
+  const [dupMap, setDupMap] = useState<Map<string, Fabric[]>>(new Map());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // For duplicate rows the admin resolves: id → "new" (overwrite existing) or "old" (keep existing)
@@ -21,19 +23,19 @@ export default function ImportReviewPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [search, setSearch] = useState("");
   const [pageSize, setPageSize] = useState(100);
-  const [detailRow, setDetailRow] = useState<ImportRow | null>(null);   // full-detail modal
-  const [compareRow, setCompareRow] = useState<ImportRow | null>(null); // duplicate compare modal
-  const [editRow, setEditRow] = useState<ImportRow | null>(null);       // manual-fix modal
+  const [detailRow, setDetailRow] = useState<FabricImportRow | null>(null);   // full-detail modal
+  const [compareRow, setCompareRow] = useState<FabricImportRow | null>(null); // duplicate compare modal
+  const [editRow, setEditRow] = useState<FabricImportRow | null>(null);       // manual-fix modal
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [completion, setCompletion] = useState<null | { added: number; overwritten: number; failed: number; errors: string[] }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireRole("fabric");
 
   const load = () => {
     setLoading(true);
-    Promise.all([getPendingImports(), getDuplicateMap(), getSuppliers()])
+    Promise.all([getPendingFabricImports(), getFabricDuplicateMap(), getSuppliers()])
       .then(([imports, dmap, sups]) => {
         setRows(imports); setDupMap(dmap); setSuppliers(sups);
         setSelected(new Set()); setResolutions({});
@@ -48,20 +50,21 @@ export default function ImportReviewPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const keyOf = (r: { type: string; acc_code: string; color: string; size: string }) =>
-    `${r.type}|${r.acc_code}|${r.color}|${r.size}`;
-  const matchesFor = (r: ImportRow) => dupMap.get(keyOf(r)) ?? [];
-  const dupCount = (r: ImportRow) => matchesFor(r).length;
-  const isDup = (r: ImportRow) => dupCount(r) > 0;
-  const isMultiDup = (r: ImportRow) => dupCount(r) > 1;
-  const isValid = (r: ImportRow) => r.type.trim() !== "" && r.unit.trim() !== "";
+  const keyOf = (r: { fabric_type: string; fabric_code: string; color: string; width: string }) =>
+    `${r.fabric_type}|${r.fabric_code}|${r.color}|${r.width}`;
+  const matchesFor = (r: FabricImportRow) => dupMap.get(keyOf(r)) ?? [];
+  const dupCount = (r: FabricImportRow) => matchesFor(r).length;
+  const isDup = (r: FabricImportRow) => dupCount(r) > 0;
+  const isMultiDup = (r: FabricImportRow) => dupCount(r) > 1;
+  const isValid = (r: FabricImportRow) => r.fabric_type.trim() !== "" && r.unit.trim() !== "";
   const supName = (id: string | null) => suppliers.find((s) => s.id === id)?.supplier_name ?? "—";
 
   const filtered = rows.filter((r) => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
-      r.acc_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q);
+    return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) ||
+      r.composition.toLowerCase().includes(q) || r.color.toLowerCase().includes(q) ||
+      r.fabric_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q);
   });
 
   const pg = usePagination(filtered, `${search}|${pageSize}`, pageSize);
@@ -89,14 +92,13 @@ export default function ImportReviewPage() {
   //  - duplicates resolved "new" (single match only) → overwrite that match
   //  - duplicates resolved "old" or unresolved → skipped
   const buildApprovalList = () => {
-    const list: (ImportRow & { overwriteId?: string })[] = [];
+    const list: (FabricImportRow & { overwriteId?: string })[] = [];
     for (const r of rows) {
       if (!isValid(r)) continue;
       if (isDup(r)) {
         if (resolutions[r.id] === "new" && !isMultiDup(r)) {
           list.push({ ...r, overwriteId: matchesFor(r)[0].id });
         }
-        // "old" or unresolved or multi-match → skip
       } else if (selected.has(r.id)) {
         list.push(r);
       }
@@ -116,14 +118,9 @@ export default function ImportReviewPage() {
     setConfirmOverwrite(false);
     setProgress({ done: 0, total: list.length });
     try {
-      const { approved, errors } = await approveImports(list, (done, total) => setProgress({ done, total }));
+      const { approved, errors } = await approveFabricImports(list, (done, total) => setProgress({ done, total }));
       const failed = list.length - approved;
-      setCompletion({
-        added: plannedAdded,
-        overwritten: plannedOverwritten,
-        failed,
-        errors: errors.slice(0, 10),
-      });
+      setCompletion({ added: plannedAdded, overwritten: plannedOverwritten, failed, errors: errors.slice(0, 10) });
       load();
     } catch (e: any) {
       showToast("เกิดข้อผิดพลาด: " + (e.message ?? ""), "error");
@@ -132,22 +129,22 @@ export default function ImportReviewPage() {
 
   const handleApproveClick = () => {
     if (buildApprovalList().length === 0) { showToast("ไม่มีรายการที่จะอนุมัติ", "error"); return; }
-    // Require confirmation if any overwrite is involved
     if (overwriteCount > 0) setConfirmOverwrite(true);
     else doApprove();
   };
 
   // Manual edit of a staged row before it's written to the database.
   const normName = (s: string) => String(s ?? "").trim().replace(/\s+/g, " ");
-  const openEdit = (r: ImportRow) => {
+  const openEdit = (r: FabricImportRow) => {
     // Snap the incoming supplier name to an existing supplier's exact name if it
     // matches (whitespace-insensitive), so the dropdown shows it selected.
     const matchedSup = suppliers.find((s) => normName(s.supplier_name) === normName(r.supplier_name));
     setEditForm({
-      type: r.type, acc_code: r.acc_code, description: r.description,
-      row: r.row, color: r.color, size: r.size,
+      fabric_type: r.fabric_type, composition: r.composition, construction: r.construction,
+      color: r.color, width: r.width, weight: r.weight, weight_unit: r.weight_unit,
+      row_label: r.row_label, fabric_code: r.fabric_code,
       quantity: r.quantity, min_quantity: r.min_quantity,
-      unit: r.unit, unit_cost: r.unit_cost,
+      unit: r.unit, unit_cost: r.unit_cost, cost_unit: r.cost_unit,
       supplier_name: matchedSup ? matchedSup.supplier_name : r.supplier_name,
     });
     setEditRow(r);
@@ -156,21 +153,23 @@ export default function ImportReviewPage() {
 
   const saveEdit = async () => {
     if (!editRow) return;
-    if (!String(editForm.type).trim() || !String(editForm.unit).trim()) {
-      showToast("ต้องระบุประเภทและหน่วย", "error"); return;
+    if (!String(editForm.fabric_type).trim() || !String(editForm.unit).trim()) {
+      showToast("ต้องระบุชนิดผ้าและหน่วย", "error"); return;
     }
     setSaving(true);
     try {
       const patch = {
-        type: String(editForm.type).trim(), acc_code: String(editForm.acc_code).trim(),
-        description: String(editForm.description).trim(),
-        row: editForm.row === "" || editForm.row === null ? null : parseInt(String(editForm.row)) || null,
-        color: String(editForm.color).trim(), size: String(editForm.size).trim(),
+        fabric_type: String(editForm.fabric_type).trim(), composition: String(editForm.composition).trim(),
+        construction: String(editForm.construction).trim(), color: String(editForm.color).trim(),
+        width: String(editForm.width).trim(), weight: Number(editForm.weight) || 0,
+        weight_unit: String(editForm.weight_unit).trim(), row_label: String(editForm.row_label).trim(),
+        fabric_code: String(editForm.fabric_code).trim(),
         quantity: Number(editForm.quantity) || 0, min_quantity: Number(editForm.min_quantity) || 0,
         unit: String(editForm.unit).trim(), unit_cost: Number(editForm.unit_cost) || 0,
+        cost_unit: String(editForm.cost_unit).trim(),
         supplier_name: String(editForm.supplier_name).trim(),
       };
-      const updated = await updateImportRow(editRow.id, patch);
+      const updated = await updateFabricImportRow(editRow.id, patch);
       setRows((prev) => prev.map((r) => (r.id === editRow.id ? { ...r, ...updated } : r)));
       setEditRow(null);
       showToast("บันทึกการแก้ไขแล้ว ✓", "success");
@@ -184,7 +183,7 @@ export default function ImportReviewPage() {
     if (ids.length === 0) return;
     setSaving(true);
     try {
-      await rejectImports(ids);
+      await rejectFabricImports(ids);
       showToast(`ปฏิเสธ ${ids.length} รายการแล้ว`, "success");
       load();
     } catch (e: any) {
@@ -202,7 +201,7 @@ export default function ImportReviewPage() {
         <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ width: "auto" }}>
           {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} ต่อหน้า</option>)}
         </select>
-        <button onClick={() => router.push("/import")}>+ นำเข้าไฟล์ใหม่</button>
+        <button onClick={() => router.push("/fabrics/import")}>+ นำเข้าไฟล์ใหม่</button>
         {actionCount > 0 && (
           <button className="primary" onClick={handleApproveClick} disabled={saving}>
             {saving ? "กำลังดำเนินการ…" : `อนุมัติ ${actionCount} รายการ`}
@@ -221,19 +220,19 @@ export default function ImportReviewPage() {
           <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>ไม่มีรายการรอตรวจสอบ</div>
         ) : (
           <div style={{ height: "62vh", overflowY: "auto", overflowX: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 1180 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 1240 }}>
               <colgroup>
-                <col style={{ width: "44px" }} /><col style={{ width: "12%" }} /><col style={{ width: "8%" }} />
-                <col style={{ width: "15%" }} /><col style={{ width: "9%" }} /><col style={{ width: "6%" }} />
-                <col style={{ width: "6%" }} /><col style={{ width: "14%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "170px" }} />
+                <col style={{ width: "44px" }} /><col style={{ width: "18%" }} /><col style={{ width: "6%" }} />
+                <col style={{ width: "13%" }} /><col style={{ width: "9%" }} /><col style={{ width: "6%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "5%" }} /><col style={{ width: "12%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "170px" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                 <tr>
                   <th style={{ textAlign: "center", background: "var(--bg2)" }}>
                     <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width: "auto", cursor: "pointer" }} title="เลือกทั้งหมด (ข้ามรายการซ้ำ)" />
                   </th>
-                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี/ขนาด</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ซัพพลายเออร์</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะ</th><th style={{ background: "var(--bg2)" }}>จัดการ</th>
+                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ชนิดผ้า</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>เลขที่</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>โครงสร้าง</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน้าผ้า</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ซัพพลายเออร์</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะ</th><th style={{ background: "var(--bg2)" }}>จัดการ</th>
                 </tr>
               </thead>
               <tbody>
@@ -253,13 +252,14 @@ export default function ImportReviewPage() {
                         )}
                       </td>
                       <td style={{ fontWeight: 500, wordBreak: "break-word", cursor: "pointer" }} onClick={() => setDetailRow(r)}>
-                        {r.type || <span style={{ color: "var(--red)" }}>ไม่มีประเภท</span>}
+                        {r.fabric_type || <span style={{ color: "var(--red)" }}>ไม่มีชนิดผ้า</span>}
                       </td>
-                      <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.acc_code || "—"}</td>
-                      <td style={{ wordBreak: "break-word", cursor: "pointer" }} onClick={() => setDetailRow(r)}>{r.description || "—"}</td>
-                      <td style={{ fontSize: 14, color: "var(--text2)" }}>{[r.color, r.size].filter(Boolean).join(" / ") || "—"}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.fabric_code || "—"}</td>
+                      <td style={{ wordBreak: "break-word", cursor: "pointer", fontSize: 14, color: "var(--text2)" }} onClick={() => setDetailRow(r)}>{r.construction || "—"}</td>
+                      <td style={{ fontSize: 14, color: "var(--text2)" }}>{r.color || "—"}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.width || "—"}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{Number(r.quantity).toLocaleString()}</td>
-                      <td style={{ color: r.unit ? "var(--text2)" : "var(--red)" }}>{r.unit || "ไม่มีหน่วย"}</td>
+                      <td style={{ color: r.unit ? "var(--text2)" : "var(--red)" }}>{r.unit || "ไม่มี"}</td>
                       <td style={{ fontSize: 14, color: "var(--text2)", wordBreak: "break-word" }}>{r.supplier_name || "—"}</td>
                       <td>
                         {!valid ? <span className="badge badge-out">ข้อมูลไม่ครบ</span>
@@ -300,7 +300,7 @@ export default function ImportReviewPage() {
 
       <p style={{ marginTop: 12, fontSize: 14, color: "var(--text3)" }}>
         "เลือกทั้งหมด" จะเลือกเฉพาะรายการใหม่ (ข้ามรายการซ้ำ) · รายการซ้ำเลือก "ทับใหม่" เพื่อเขียนทับข้อมูลเดิม หรือ "คงเดิม" เพื่อข้าม ·
-        รายการที่ซ้ำหลายรายการต้องจัดการเองในหน้าจัดการ · กด "เทียบ" เพื่อดูความต่าง · คลิกแถวเพื่อดูข้อมูลทั้งหมด
+        ตรวจซ้ำจาก ชนิดผ้า + เลขที่ + สี + หน้าผ้า · กด "เทียบ" เพื่อดูความต่าง · คลิกแถวเพื่อดูข้อมูลทั้งหมด
       </p>
 
       {/* Full detail modal */}
@@ -309,20 +309,23 @@ export default function ImportReviewPage() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <div style={{ fontWeight: 500, fontSize: 16 }}>{detailRow.type}</div>
-                <div style={{ fontSize: 14, color: "var(--text2)" }}>{detailRow.description}</div>
+                <div style={{ fontWeight: 500, fontSize: 16 }}>{detailRow.fabric_type}</div>
+                <div style={{ fontSize: 14, color: "var(--text2)" }}>{[detailRow.color, detailRow.construction].filter(Boolean).join(" · ")}</div>
               </div>
               <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setDetailRow(null)}>✕</button>
             </div>
             <div className="modal-body">
-              {[
-                ["รหัสสินค้า", detailRow.acc_code],
-                ["รายละเอียด", detailRow.description],
-                ["สี", detailRow.color], ["ขนาด", detailRow.size],
-                ["แถว", detailRow.row != null ? String(detailRow.row) : ""],
+              {([
+                ["เลขที่", detailRow.fabric_code],
+                ["เส้นใย", detailRow.composition],
+                ["โครงสร้าง", detailRow.construction],
+                ["สี", detailRow.color],
+                ["หน้าผ้า", detailRow.width],
+                ["น้ำหนัก", detailRow.weight ? `${Number(detailRow.weight).toLocaleString()} ${detailRow.weight_unit}` : ""],
+                ["แถว", detailRow.row_label],
                 ["สต็อค", `${Number(detailRow.quantity).toLocaleString()} ${detailRow.unit}`],
                 ["สต็อคขั้นต่ำ", String(detailRow.min_quantity)],
-                ["ราคาซื้อ", `฿${Number(detailRow.unit_cost).toFixed(2)}`],
+                ["ราคาต่อหน่วย", `฿${Number(detailRow.unit_cost).toFixed(2)}${detailRow.cost_unit ? ` / ${detailRow.cost_unit}` : ""}`],
                 ["— ซัพพลายเออร์ —", ""],
                 ["ชื่อบริษัท", detailRow.supplier_name],
                 ["ผู้ติดต่อ", detailRow.contact_person],
@@ -334,12 +337,12 @@ export default function ImportReviewPage() {
                 ["ระยะเวลาส่ง", detailRow.lead_time],
                 ["เทอมจ่ายเงิน", detailRow.payment_term],
                 ["เลขผู้เสียภาษี", detailRow.tax_id],
-              ].map(([label, val], i) => (
+              ] as [string, string][]).map(([label, val], i) => (
                 label.startsWith("—") ? (
                   <div key={i} style={{ padding: "10px 0 4px", fontSize: 13, color: "var(--accent)", fontWeight: 500 }}>{label}</div>
                 ) : (
                   <div key={i} style={{ display: "flex", padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
-                    <span style={{ width: 130, color: "var(--text3)", fontSize: 14, flexShrink: 0 }}>{label}</span>
+                    <span style={{ width: 140, color: "var(--text3)", fontSize: 14, flexShrink: 0 }}>{label}</span>
                     <span style={{ color: "var(--text)", wordBreak: "break-word" }}>{val || "—"}</span>
                   </div>
                 )
@@ -355,17 +358,20 @@ export default function ImportReviewPage() {
       {/* Compare modal */}
       {compareRow && (() => {
         const matches = matchesFor(compareRow);
-        const fields: [string, (a: Accessory) => string, string][] = [
-          ["ประเภท", (a) => a.type, compareRow.type],
-          ["รหัสสินค้า", (a) => a.acc_code, compareRow.acc_code],
-          ["รายละเอียด", (a) => a.description, compareRow.description],
-          ["สี", (a) => a.color, compareRow.color],
-          ["ขนาด", (a) => a.size, compareRow.size],
-          ["หน่วย", (a) => a.unit, compareRow.unit],
-          ["ราคาซื้อ", (a) => `฿${Number(a.unit_cost).toFixed(2)}`, compareRow.unit_cost ? `฿${compareRow.unit_cost.toFixed(2)}` : "—"],
-          ["สต็อค", (a) => String(a.quantity), String(compareRow.quantity)],
-          ["ขั้นต่ำ", (a) => String(a.min_quantity), String(compareRow.min_quantity)],
-          ["ซัพพลายเออร์", (a) => supName(a.supplier_id), compareRow.supplier_name || "—"],
+        const fields: [string, (f: Fabric) => string, string][] = [
+          ["ชนิดผ้า", (f) => f.fabric_type, compareRow.fabric_type],
+          ["เลขที่", (f) => f.fabric_code, compareRow.fabric_code],
+          ["เส้นใย", (f) => f.composition, compareRow.composition],
+          ["โครงสร้าง", (f) => f.construction, compareRow.construction],
+          ["สี", (f) => f.color, compareRow.color],
+          ["หน้าผ้า", (f) => f.width, compareRow.width],
+          ["น้ำหนัก", (f) => `${Number(f.weight)} ${f.weight_unit}`.trim(), `${Number(compareRow.weight)} ${compareRow.weight_unit}`.trim()],
+          ["แถว", (f) => f.row_label, compareRow.row_label],
+          ["หน่วย", (f) => f.unit, compareRow.unit],
+          ["ราคาต่อหน่วย", (f) => `฿${Number(f.unit_cost).toFixed(2)}`, compareRow.unit_cost ? `฿${Number(compareRow.unit_cost).toFixed(2)}` : "—"],
+          ["สต็อค", (f) => String(f.quantity), String(compareRow.quantity)],
+          ["ขั้นต่ำ", (f) => String(f.min_quantity), String(compareRow.min_quantity)],
+          ["ซัพพลายเออร์", (f) => supName(f.supplier_id), compareRow.supplier_name || "—"],
         ];
         return (
           <div className="modal-overlay" onClick={() => setCompareRow(null)}>
@@ -414,19 +420,19 @@ export default function ImportReviewPage() {
               <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setEditRow(null)}>✕</button>
             </div>
             <div className="modal-body">
+              <div className="form-row">
+                <label className="form-label">ชนิดผ้า <span style={{ color: "var(--red)" }}>*</span></label>
+                <input value={editForm.fabric_type} onChange={(e) => ef("fabric_type", e.target.value)} />
+              </div>
               <div className="form-row form-grid form-grid-2">
                 <div>
-                  <label className="form-label">ประเภท <span style={{ color: "var(--red)" }}>*</span></label>
-                  <input value={editForm.type} onChange={(e) => ef("type", e.target.value)} />
+                  <label className="form-label">เส้นใย</label>
+                  <input value={editForm.composition} onChange={(e) => ef("composition", e.target.value)} />
                 </div>
                 <div>
-                  <label className="form-label">รหัสสินค้า</label>
-                  <input value={editForm.acc_code} onChange={(e) => ef("acc_code", e.target.value)} />
+                  <label className="form-label">โครงสร้าง</label>
+                  <input value={editForm.construction} onChange={(e) => ef("construction", e.target.value)} />
                 </div>
-              </div>
-              <div className="form-row">
-                <label className="form-label">รายละเอียด</label>
-                <input value={editForm.description} onChange={(e) => ef("description", e.target.value)} />
               </div>
               <div className="form-row form-grid form-grid-3">
                 <div>
@@ -434,32 +440,68 @@ export default function ImportReviewPage() {
                   <input value={editForm.color} onChange={(e) => ef("color", e.target.value)} />
                 </div>
                 <div>
-                  <label className="form-label">ขนาด</label>
-                  <input value={editForm.size} onChange={(e) => ef("size", e.target.value)} />
+                  <label className="form-label">หน้าผ้า</label>
+                  <input value={editForm.width} onChange={(e) => ef("width", e.target.value)} placeholder="73.5 / 32T" />
                 </div>
                 <div>
-                  <label className="form-label">แถว (ด้าย)</label>
-                  <input type="number" value={editForm.row ?? ""} onChange={(e) => ef("row", e.target.value)} placeholder="—" />
+                  <label className="form-label">แถว</label>
+                  <input value={editForm.row_label} onChange={(e) => ef("row_label", e.target.value)} placeholder="A1" />
                 </div>
               </div>
-              <div className="form-row form-grid form-grid-2">
+              <div className="form-row form-grid form-grid-3">
+                <div>
+                  <label className="form-label">เลขที่</label>
+                  <input value={editForm.fabric_code} onChange={(e) => ef("fabric_code", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">น้ำหนัก</label>
+                  <input type="number" step="any" value={editForm.weight} onChange={(e) => ef("weight", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">หน่วยน้ำหนัก</label>
+                  <select value={editForm.weight_unit || ""} onChange={(e) => ef("weight_unit", e.target.value)}>
+                    <option value="">—</option>
+                    {editForm.weight_unit && !WEIGHT_UNITS.includes(editForm.weight_unit) && (
+                      <option value={editForm.weight_unit}>{editForm.weight_unit}</option>
+                    )}
+                    {WEIGHT_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-row form-grid form-grid-3">
                 <div>
                   <label className="form-label">หน่วย <span style={{ color: "var(--red)" }}>*</span></label>
-                  <input value={editForm.unit} onChange={(e) => ef("unit", e.target.value)} placeholder="เช่น เส้น" />
+                  <select value={editForm.unit || ""} onChange={(e) => ef("unit", e.target.value)}>
+                    <option value="">—</option>
+                    {editForm.unit && !STOCK_UNITS.includes(editForm.unit) && (
+                      <option value={editForm.unit}>{editForm.unit}</option>
+                    )}
+                    {STOCK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
                 </div>
-                <div>
-                  <label className="form-label">ราคาซื้อ (฿)</label>
-                  <input type="number" step="0.0001" value={editForm.unit_cost} onChange={(e) => ef("unit_cost", e.target.value)} />
-                </div>
-              </div>
-              <div className="form-row form-grid form-grid-2">
                 <div>
                   <label className="form-label">สต็อค</label>
-                  <input type="number" value={editForm.quantity} onChange={(e) => ef("quantity", e.target.value)} />
+                  <input type="number" step="any" value={editForm.quantity} onChange={(e) => ef("quantity", e.target.value)} />
                 </div>
                 <div>
                   <label className="form-label">ขั้นต่ำ</label>
-                  <input type="number" value={editForm.min_quantity} onChange={(e) => ef("min_quantity", e.target.value)} />
+                  <input type="number" step="any" value={editForm.min_quantity} onChange={(e) => ef("min_quantity", e.target.value)} />
+                </div>
+              </div>
+              <div className="form-row form-grid form-grid-2">
+                <div>
+                  <label className="form-label">ราคาต่อหน่วย (฿)</label>
+                  <input type="number" step="0.0001" value={editForm.unit_cost} onChange={(e) => ef("unit_cost", e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">ราคาต่อ</label>
+                  <select value={editForm.cost_unit || ""} onChange={(e) => ef("cost_unit", e.target.value)}>
+                    <option value="">—</option>
+                    {editForm.cost_unit && !STOCK_UNITS.includes(editForm.cost_unit) && (
+                      <option value={editForm.cost_unit}>{editForm.cost_unit}</option>
+                    )}
+                    {STOCK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
                 </div>
               </div>
               <div className="form-row">
@@ -551,12 +593,12 @@ export default function ImportReviewPage() {
                 </div>
               )}
               <p style={{ fontSize: 14, color: "var(--text3)", marginTop: 12 }}>
-                รายการที่บันทึกแล้วจะปรากฏในหน้าสต็อคทันที
+                รายการที่บันทึกแล้วจะปรากฏในหน้าสต็อคผ้าทันที
               </p>
             </div>
             <div className="modal-footer">
               <button onClick={() => setCompletion(null)}>ปิด</button>
-              <button className="primary" onClick={() => router.push("/stock")}>ไปที่หน้าสต็อค</button>
+              <button className="primary" onClick={() => router.push("/fabrics")}>ไปที่หน้าสต็อคผ้า</button>
             </div>
           </div>
         </div>

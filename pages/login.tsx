@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
+import { startSession, HOME_FOR, type Role } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,8 +22,12 @@ export default function LoginPage() {
         body: JSON.stringify({ username: u, password: p }),
       });
       if (res.ok) {
-        sessionStorage.setItem("manage_auth", "1");
-        router.push("/manage");
+        // The server decides the role from which account matched; a section admin
+        // lands in their own section, the super admin gets the picker.
+        const { role } = (await res.json()) as { role?: Role };
+        const r: Role = role ?? "super";
+        startSession(r);
+        router.push(HOME_FOR[r]);
       } else {
         const data = await res.json();
         setError(data.error ?? "เกิดข้อผิดพลาด");
@@ -39,10 +44,13 @@ export default function LoginPage() {
       <div style={{ width: "100%", maxWidth: 360 }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <div style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>
-            ACC STOCK
+            ACCESSORY · FABRIC
           </div>
           <div style={{ fontSize: 23, fontWeight: 500, marginTop: 8 }}>จัดการระบบ</div>
           <div style={{ fontSize: 17, color: "var(--text3)", marginTop: 4 }}>Manage — Login required</div>
+          <div style={{ fontSize: 14, color: "var(--text3)", marginTop: 8 }}>
+            ระบบจะพาไปยังส่วนที่บัญชีของคุณดูแลโดยอัตโนมัติ
+          </div>
         </div>
 
         <div className="card" style={{ padding: 24 }}>

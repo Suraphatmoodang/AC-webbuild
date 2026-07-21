@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addTransaction, revertTransaction, getTransactionsByAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot, type Transaction } from "@/lib/store";
 import { useRequireRole } from "@/lib/auth";
+import { getFabrics, addFabricTransaction, revertFabricTransaction, getFabricTransactionsByFabric,
+  getFabricLotMap, stockFromLots, valueFromLots,
+  type Fabric, type FabricLot, type FabricTransaction } from "@/lib/fabric-store";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
-import { compareAccessory } from "@/lib/sort";
+import { compareFabric } from "@/lib/sort";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -15,9 +17,10 @@ const TX_LABELS: Record<TxType, { th: string; en: string }> = {
   RETURN: { th: "คืนสต็อค", en: "Return"  },
 };
 
-// Toggleable "revert last transaction" affordance — scaffolding for undoing a
-// mistaken entry. Gated by `txRevertEnabled` below (off until revertTransaction is
-// implemented in the store). Same gate pattern as manage's StockEditor.
+// Label a fabric variant in one line for the picker/summary.
+const variantLine = (f: Fabric) =>
+  [f.color, f.width && `หน้า ${f.width}`, f.fabric_code && `#${f.fabric_code}`].filter(Boolean).join(" · ");
+
 function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert: () => void }) {
   return (
     <button onClick={onRevert} disabled={disabled}
@@ -28,10 +31,9 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
 }
 
 // Who recorded the transaction. Currently ONE fixed user, but structured so it can
-// later become a dropdown (extend RECORDERS) or a free-text field — flip
-// `recorderPickerEnabled` to true. Same gate pattern as StockEditor / txRevert.
-const RECORDERS = ["เตือน"];             // roster of possible recorders (currently one)
-const recorderPickerEnabled = false;     // false → fixed read-only; true → dropdown
+// later become a dropdown (extend RECORDERS) — flip `recorderPickerEnabled` to true.
+const RECORDERS = ["เตือน"];
+const recorderPickerEnabled = false;
 
 function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   if (!recorderPickerEnabled) {
@@ -41,7 +43,6 @@ function RecordedByField({ value, onChange }: { value: string; onChange: (v: str
       </div>
     );
   }
-  // Future: pick from the roster. Swap this <select> for an <input> for free text.
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
       {RECORDERS.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -49,14 +50,14 @@ function RecordedByField({ value, onChange }: { value: string; onChange: (v: str
   );
 }
 
-export default function TransactionsPage() {
+export default function FabricTransactionsPage() {
   const router = useRouter();
-  const [items, setItems] = useState<Accessory[]>([]);
-  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
+  const [items, setItems] = useState<Fabric[]>([]);
+  const [lotMap, setLotMap] = useState<Map<string, FabricLot[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedType, setSelectedType] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Accessory | null>(null);
+  const [selected, setSelected] = useState<Fabric | null>(null);
   const [txType, setTxType] = useState<TxType>("IN");
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");           // IN / RETURN
@@ -66,18 +67,16 @@ export default function TransactionsPage() {
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split("T")[0]);
   const [refNo, setRefNo] = useState("");
   const [note, setNote] = useState("");
-  // Recorder for "ผู้บันทึก" — fixed to the single user for now (see RecordedByField).
   const [by, setBy] = useState(RECORDERS[0]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  // Auth gate — transactions is now protected
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireRole("fabric");
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([getAccessories(), getLotMap()])
-      .then(([accs, lm]) => { setItems(accs); setLotMap(lm); })
+    Promise.all([getFabrics(), getFabricLotMap()])
+      .then(([fabs, lm]) => { setItems(fabs); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, [authed]);
 
@@ -90,19 +89,18 @@ export default function TransactionsPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Gate for the "revert last transaction" feature. A future admin-auth page will
-  // drive this (same pattern as manage's stockEditEnabled). Flip to false to hide.
+  // Gate for the "revert last transaction" feature (same pattern as manage's
+  // stockEditEnabled). Flip to false to hide.
   const txRevertEnabled = true;
-  const [revertTx, setRevertTx] = useState<Transaction | null>(null); // pending confirm
+  const [revertTx, setRevertTx] = useState<FabricTransaction | null>(null); // pending confirm
   const [reverting, setReverting] = useState(false);
 
-  // Open the confirm modal for the latest transaction of the selected item.
   const handleRevertLast = async () => {
-    if (!selected) { showToast("เลือกอุปกรณ์ก่อน", "error"); return; }
+    if (!selected) { showToast("เลือกผ้าก่อน", "error"); return; }
     try {
-      const txs = await getTransactionsByAccessory(selected.id); // ascending
+      const txs = await getFabricTransactionsByFabric(selected.id); // ascending
       const latest = txs[txs.length - 1];
-      if (!latest) { showToast("ไม่มีรายการให้ย้อนสำหรับอุปกรณ์นี้", "error"); return; }
+      if (!latest) { showToast("ไม่มีรายการให้ย้อนสำหรับผ้าชิ้นนี้", "error"); return; }
       setRevertTx(latest);
     } catch (e: any) {
       showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
@@ -112,58 +110,59 @@ export default function TransactionsPage() {
   const confirmRevert = async () => {
     if (!revertTx) return;
     setReverting(true);
-    const res = await revertTransaction(revertTx.id);
+    const res = await revertFabricTransaction(revertTx.id);
     setReverting(false);
     if ("error" in res) { showToast(res.error, "error"); return; }
     setRevertTx(null);
-    const [fresh, lm] = await Promise.all([getAccessories(), getLotMap()]);
+    const [fresh, lm] = await Promise.all([getFabrics(), getFabricLotMap()]);
     setItems(fresh); setLotMap(lm);
-    setSelected(fresh.find((a) => a.id === selected?.id) ?? null);
+    setSelected(fresh.find((f) => f.id === selected?.id) ?? null);
     showToast("ย้อนรายการล่าสุดแล้ว ✓", "success");
   };
 
-  const matchSearch = (i: Accessory) => {
+  const matchSearch = (i: Fabric) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
-      i.type.toLowerCase().includes(q) ||
-      i.acc_code.toLowerCase().includes(q) ||
-      i.description.toLowerCase().includes(q) ||
+      i.fabric_type.toLowerCase().includes(q) ||
+      i.composition.toLowerCase().includes(q) ||
+      i.construction.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
-      i.size.toLowerCase().includes(q)
+      i.width.toLowerCase().includes(q) ||
+      i.fabric_code.toLowerCase().includes(q) ||
+      i.row_label.toLowerCase().includes(q)
     );
   };
-  // type → color → size, memoized (can be the full catalog).
-  const filtered = useMemo(() => items.filter(matchSearch).sort(compareAccessory), [items, search]);
+  const filtered = useMemo(() => items.filter(matchSearch).sort(compareFabric), [items, search]);
 
   const searching = search.trim().length > 0;
-  // Global (cross-type) search only applies at the top level. Once drilled into
-  // a type, the search box filters within that type's variants instead.
+  // Global (cross-type) search only applies at the top level. Once drilled into a
+  // fabric type, the search box filters within that type's variants instead.
   const globalSearch = searching && !selectedType;
 
-  // Build the list of types with item counts (for the first drilldown step)
+  // Fabric types with item counts (first drilldown step)
   const typeGroups = (() => {
     const map = new Map<string, { count: number; low: number }>();
     for (const i of items) {
-      const g = map.get(i.type) ?? { count: 0, low: 0 };
+      const g = map.get(i.fabric_type) ?? { count: 0, low: 0 };
       g.count += 1;
       if (stockOf(i.id) <= Number(i.min_quantity)) g.low += 1;
-      map.set(i.type, g);
+      map.set(i.fabric_type, g);
     }
     return Array.from(map.entries())
       .map(([type, g]) => ({ type, ...g }))
-      .sort((a, b) => a.type.localeCompare(b.type, "th"));
+      .sort((a, b) => a.type.localeCompare(b.type, "th", { numeric: true }));
   })();
 
-  // Variants of the chosen type (second drilldown step), filtered by the search
-  // box so search is scoped to the selected type. Sorted color → size (same type).
+  // Variants of the chosen type (second drilldown step), filtered by the search box
+  // so search is scoped to the selected type.
   const variantsOfType = useMemo(
-    () => selectedType ? items.filter((i) => i.type === selectedType && matchSearch(i)).sort(compareAccessory) : [],
+    () => selectedType ? items.filter((i) => i.fabric_type === selectedType && matchSearch(i)).sort(compareFabric) : [],
     [items, selectedType, search]
   );
 
-  // Both lists can run into the thousands (e.g. ด้าย / ยาง), so page them —
-  // rendering every match at once locks the main thread and freezes the page.
+  // Both lists can get long, so page them — rendering every match at once locks
+  // the main thread and freezes the page.
   const searchPg = usePagination(filtered, `search|${search}`);
   const variantPg = usePagination(variantsOfType, `type|${selectedType ?? ""}|${search}`);
 
@@ -179,8 +178,8 @@ export default function TransactionsPage() {
     if (txType === "ADJUST" && !lotId) { showToast("กรุณาเลือกล็อตที่ต้องการปรับ", "error"); return; }
 
     setSaving(true);
-    const result = await addTransaction({
-      accessory_id: selected.id,
+    const result = await addFabricTransaction({
+      fabric_id: selected.id,
       type: txType,
       qty: q,
       unit_cost: (txType === "IN" || txType === "RETURN") ? parseFloat(price) || 0 : undefined,
@@ -192,10 +191,9 @@ export default function TransactionsPage() {
     setSaving(false);
     if ("error" in result) { showToast(result.error, "error"); return; }
     showToast(`✓ บันทึกแล้ว — ${TX_LABELS[txType].th} ${q} ${selected.unit}`, "success");
-    // Refresh lots + items and update selected
-    const [fresh, lm] = await Promise.all([getAccessories(), getLotMap()]);
+    const [fresh, lm] = await Promise.all([getFabrics(), getFabricLotMap()]);
     setItems(fresh); setLotMap(lm);
-    setSelected(fresh.find((a) => a.id === selected.id) ?? null);
+    setSelected(fresh.find((f) => f.id === selected.id) ?? null);
     setQty(""); setPrice(""); setRefNo(""); setNote(""); setLotId(""); setManualLot(false);
   };
 
@@ -221,17 +219,17 @@ export default function TransactionsPage() {
       {/* Item picker */}
       <div>
         <div style={{ marginBottom: 12 }}>
-          <SearchInput value={search} onChange={setSearch} placeholder={selectedType ? `ค้นหาใน ${selectedType}…` : "ค้นหาอุปกรณ์ที่ต้องการบันทึก…"} />
+          <SearchInput value={search} onChange={setSearch} placeholder={selectedType ? `ค้นหาใน ${selectedType}…` : "ค้นหาผ้าที่ต้องการบันทึก…"} />
         </div>
 
         {/* Breadcrumb / back bar — whenever drilled into a type (incl. while searching within it) */}
         {selectedType && (
-          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => { setSelectedType(null); setSearch(""); }} style={{ padding: "6px 12px", fontSize: 15 }}>
-              ← ประเภททั้งหมด
+              ← ชนิดผ้าทั้งหมด
             </button>
             <span style={{ fontSize: 16, color: "var(--text2)" }}>
-              <span style={{ color: "var(--text3)" }}>ประเภท:</span> <strong style={{ color: "var(--accent)" }}>{selectedType}</strong>
+              <span style={{ color: "var(--text3)" }}>ชนิดผ้า:</span> <strong style={{ color: "var(--accent)" }}>{selectedType}</strong>
             </span>
           </div>
         )}
@@ -246,7 +244,7 @@ export default function TransactionsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>ประเภท / รายละเอียด</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>ชนิดผ้า / โครงสร้าง</th><th>สี</th><th>หน้าผ้า</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -260,13 +258,13 @@ export default function TransactionsPage() {
                       <tr key={item.id} style={{ cursor: "pointer", background: isSel ? "var(--bg4)" : undefined }}
                         onClick={() => { setSelected(item); setQty(""); }}>
                         <td>
-                          <div style={{ fontWeight: 500, fontSize: 17 }}>{item.type}</div>
-                          <div style={{ fontSize: 14, color: "var(--text2)" }}>{item.description}{item.acc_code ? ` · ${item.acc_code}` : ""}</div>
+                          <div style={{ fontWeight: 500, fontSize: 17 }}>{item.fabric_type}</div>
+                          <div style={{ fontSize: 14, color: "var(--text2)" }}>{item.construction}{item.fabric_code ? ` · #${item.fabric_code}` : ""}</div>
                         </td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
-                          {item.size || (item.row ? "" : "—")}
-                          {item.row && <div style={{ color: "var(--text3)", fontSize: 13 }}>แถว {item.row}</div>}
+                          {item.width || "—"}
+                          {item.row_label && <div style={{ color: "var(--text3)", fontSize: 13 }}>แถว {item.row_label}</div>}
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
@@ -284,21 +282,20 @@ export default function TransactionsPage() {
             <PaginationBar {...searchPg} />
             </>
           ) : !selectedType ? (
-            /* ── STEP 1: pick a type ── */
+            /* ── STEP 1: pick a fabric type ── */
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
               <table>
                 <thead>
                   <tr>
-                    <th>ประเภทอุปกรณ์</th><th className="num">จำนวนรายการ</th><th></th>
+                    <th>ชนิดผ้า</th><th className="num">จำนวนรายการ</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {typeGroups.length === 0 && (
-                    <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีอุปกรณ์</td></tr>
+                    <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีผ้าในระบบ</td></tr>
                   )}
                   {typeGroups.map((g) => (
-                    <tr key={g.type} style={{ cursor: "pointer" }}
-                      onClick={() => { setSelectedType(g.type); }}>
+                    <tr key={g.type} style={{ cursor: "pointer" }} onClick={() => { setSelectedType(g.type); }}>
                       <td style={{ fontWeight: 500, fontSize: 17 }}>{g.type}</td>
                       <td className="num" style={{ color: "var(--text2)" }}>
                         {g.count} รายการ
@@ -311,13 +308,13 @@ export default function TransactionsPage() {
               </table>
             </div>
           ) : (
-            /* ── STEP 2: pick a variant (size / color) within the type ── */
+            /* ── STEP 2: pick a variant (สี / หน้าผ้า) within the type ── */
             <>
             <div style={{ overflowX: "auto", maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
               <table>
                 <thead>
                   <tr>
-                    <th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>โครงสร้าง / เลขที่</th><th>สี</th><th>หน้าผ้า</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -331,13 +328,13 @@ export default function TransactionsPage() {
                       <tr key={item.id} style={{ cursor: "pointer", background: isSel ? "var(--bg4)" : undefined }}
                         onClick={() => { setSelected(item); setQty(""); }}>
                         <td>
-                          <div style={{ fontWeight: 500, fontSize: 16 }}>{item.description || "—"}</div>
-                          {item.acc_code && <div style={{ fontSize: 14, color: "var(--text3)" }}>{item.acc_code}</div>}
+                          <div style={{ fontWeight: 500, fontSize: 16 }}>{item.construction || "—"}</div>
+                          {item.fabric_code && <div style={{ fontSize: 14, color: "var(--text3)" }}>#{item.fabric_code}</div>}
                         </td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
-                          {item.size || (item.row ? "" : "—")}
-                          {item.row && <div style={{ color: "var(--text3)", fontSize: 13 }}>แถว {item.row}</div>}
+                          {item.width || "—"}
+                          {item.row_label && <div style={{ color: "var(--text3)", fontSize: 13 }}>แถว {item.row_label}</div>}
                         </td>
                         <td className="num">
                           <span style={{ color: isLow ? "var(--accent)" : "var(--text)", fontFamily: "var(--mono)", fontWeight: 500 }}>
@@ -363,16 +360,14 @@ export default function TransactionsPage() {
         <div className="card" style={{ padding: 20 }}>
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 15, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-              บันทึกรายการ · Transaction Entry
+              บันทึกรายการผ้า · Fabric Entry
             </div>
             {selected ? (
               <div>
-                <div style={{ fontWeight: 500, fontSize: 18 }}>{selected.type}</div>
-                <div style={{ fontSize: 15, color: "var(--text2)" }}>{selected.description}</div>
-                {(selected.color || selected.size) && (
-                  <div style={{ fontSize: 14, color: "var(--text3)", marginTop: 2 }}>
-                    {[selected.color, selected.size, selected.acc_code].filter(Boolean).join(" · ")}
-                  </div>
+                <div style={{ fontWeight: 500, fontSize: 18 }}>{selected.fabric_type}</div>
+                <div style={{ fontSize: 15, color: "var(--text2)" }}>{selected.construction || selected.composition}</div>
+                {variantLine(selected) && (
+                  <div style={{ fontSize: 14, color: "var(--text3)", marginTop: 2 }}>{variantLine(selected)}</div>
                 )}
               </div>
             ) : (
@@ -416,7 +411,7 @@ export default function TransactionsPage() {
           {/* Price — for IN and RETURN (creates a lot at this cost) */}
           {(txType === "IN" || txType === "RETURN") && (
             <div className="form-row">
-              <label className="form-label">ราคาซื้อ/หน่วย · Unit cost (฿)</label>
+              <label className="form-label">ราคาซื้อ/หน่วย · Unit cost (฿{selected?.cost_unit ? ` / ${selected.cost_unit}` : ""})</label>
               <input type="number" min="0" step="0.0001" placeholder="0.00" value={price} onChange={(e) => setPrice(e.target.value)}
                 style={{ fontFamily: "var(--mono)" }} />
               <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>สร้างล็อตใหม่ที่ราคานี้</div>
@@ -526,7 +521,7 @@ export default function TransactionsPage() {
             </div>
             <div className="modal-body">
               <p style={{ color: "var(--text2)" }}>
-                จะย้อน (ยกเลิก) รายการล่าสุดของ <strong style={{ color: "var(--text)" }}>{selected?.type} {selected?.description}</strong>:
+                จะย้อน (ยกเลิก) รายการล่าสุดของ <strong style={{ color: "var(--text)" }}>{selected?.fabric_type} {selected?.color}</strong>:
               </p>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: "var(--bg3)", borderRadius: "var(--r)", margin: "10px 0", fontSize: 15 }}>
                 <span><strong>{TX_LABELS[revertTx.transaction_type].th}</strong> · {Math.abs(Number(revertTx.quantity)).toLocaleString()}</span>
@@ -535,7 +530,7 @@ export default function TransactionsPage() {
                 </span>
               </div>
               <p style={{ fontSize: 14, color: "var(--text3)" }}>
-                ล็อตจะถูกคืนสู่สภาพก่อนรายการนี้ และรายการนี้จะถูกลบออกจากประวัติ — ย้อนได้เฉพาะรายการล่าสุดของอุปกรณ์นี้เท่านั้น
+                ล็อตจะถูกคืนสู่สภาพก่อนรายการนี้ และรายการนี้จะถูกลบออกจากประวัติ — ย้อนได้เฉพาะรายการล่าสุดของผ้าชิ้นนี้เท่านั้น
               </p>
             </div>
             <div className="modal-footer">

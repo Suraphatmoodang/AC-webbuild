@@ -1,33 +1,39 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, overwriteStock, type Accessory, type Supplier, type Lot } from "@/lib/store";
-import { usePagination, PaginationBar } from "@/lib/pagination";
 import { useRequireRole } from "@/lib/auth";
+import { getFabrics, addFabric, updateFabric, deleteFabric, getSuppliers, bulkDeleteFabrics,
+  bulkDeactivateFabrics, getFabricLotMap, stockFromLots, valueFromLots, createFabricLot, overwriteFabricStock,
+  type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
+import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
-import { compareAccessory } from "@/lib/sort";
+import { compareFabric } from "@/lib/sort";
+import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
 
-const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
-
-type FormData = Omit<Accessory, "id" | "created_at" | "updated_at">;
+type FormData = Omit<Fabric, "id" | "created_at" | "updated_at">;
 
 const emptyForm = (): FormData => ({
-  type: "", acc_code: "", description: "", row: null,
-  color: "", size: "", quantity: 0, unit: "เส้น",
-  unit_cost: 0, min_quantity: 10, supplier_id: null, valuation_method: "fifo", is_active: true,
+  fabric_type: "", composition: "", construction: "", color: "",
+  width: "", weight: 0, weight_unit: "gm2", row_label: "", fabric_code: "",
+  quantity: 0, unit: "กก", unit_cost: 0, cost_unit: "กก",
+  min_quantity: 10, supplier_id: null, valuation_method: "fifo", is_active: true,
 });
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
 
 function validate(form: FormData): FormErrors {
   const errors: FormErrors = {};
-  if (!form.type.trim())  errors.type     = "กรุณาระบุประเภทอุปกรณ์";
-  if (!form.unit.trim())  errors.unit     = "กรุณาระบุหน่วย";
-  if (form.quantity < 0)  errors.quantity = "จำนวนต้องไม่ติดลบ";
+  if (!form.fabric_type.trim()) errors.fabric_type = "กรุณาระบุชนิดผ้า";
+  if (!form.unit.trim())        errors.unit        = "กรุณาระบุหน่วย";
+  if (form.quantity < 0)        errors.quantity    = "จำนวนต้องไม่ติดลบ";
   return errors;
 }
 
-function TypeCombobox({ value, onChange, options, hasError }: {
-  value: string; onChange: (v: string) => void; options: string[]; hasError?: boolean;
+// Free-text-with-suggestions input: pick an existing value or type a brand new one.
+// Used for ชนิดผ้า / เส้นใย / โครงสร้าง, which are open vocabularies that grow as
+// new fabrics arrive — a plain <select> would make new values unenterable.
+function Combobox({ value, onChange, options, placeholder, hasError }: {
+  value: string; onChange: (v: string) => void; options: string[];
+  placeholder?: string; hasError?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
@@ -41,7 +47,7 @@ function TypeCombobox({ value, onChange, options, hasError }: {
         onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="เช่น ซิป วีนัส"
+        placeholder={placeholder}
         style={hasError ? { borderColor: "var(--red)" } : {}}
         autoComplete="off"
       />
@@ -55,7 +61,7 @@ function TypeCombobox({ value, onChange, options, hasError }: {
           {filtered.length === 0 && query && (
             <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--accent)", cursor: "pointer" }}
               onMouseDown={() => select(query)}>
-              + สร้างประเภทใหม่: "{query}"
+              + เพิ่มใหม่: "{query}"
             </div>
           )}
           {filtered.map((opt) => (
@@ -72,7 +78,7 @@ function TypeCombobox({ value, onChange, options, hasError }: {
             <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--accent)", cursor: "pointer",
               borderTop: "1px solid var(--border)" }}
               onMouseDown={() => select(query)}>
-              + สร้างประเภทใหม่: "{query}"
+              + เพิ่มใหม่: "{query}"
             </div>
           )}
         </div>
@@ -120,9 +126,7 @@ function SupplierCombobox({ value, onChange, options }: {
             — ไม่ระบุ —
           </div>
           {filtered.length === 0 && (
-            <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--text3)" }}>
-              ไม่พบซัพพลายเออร์
-            </div>
+            <div style={{ padding: "8px 12px", fontSize: 13, color: "var(--text3)" }}>ไม่พบซัพพลายเออร์</div>
           )}
           {filtered.map((opt) => (
             <div key={opt.id} onMouseDown={() => select(opt.id)}
@@ -142,8 +146,7 @@ function SupplierCombobox({ value, onChange, options }: {
 
 // Editable stock + price for the edit modal. Changing the stock and saving
 // OVERWRITES the item's lots with one new opening lot at this price (see
-// overwriteStock in the store). Rendered only when stock-editing is enabled —
-// a future separate-auth page will gate this via the `stockEditEnabled` flag.
+// overwriteFabricStock in the store). Gated by `stockEditEnabled`.
 function StockEditor({ currentStock, quantity, unitCost, unit, onQuantity, onUnitCost, error }: {
   currentStock: number;
   quantity: number;
@@ -163,7 +166,7 @@ function StockEditor({ currentStock, quantity, unitCost, unit, onQuantity, onUni
       </div>
       <div>
         <label className="form-label">สต็อค (เขียนทับ)</label>
-        <input type="number" value={quantity}
+        <input type="number" step="any" value={quantity}
           onChange={(e) => onQuantity(parseFloat(e.target.value) || 0)}
           style={error ? { borderColor: "var(--red)" } : {}} />
         {error && <div style={{ fontSize: 11, color: "var(--red)", marginTop: 3 }}>{error}</div>}
@@ -177,11 +180,11 @@ function StockEditor({ currentStock, quantity, unitCost, unit, onQuantity, onUni
   );
 }
 
-export default function ManagePage() {
+export default function FabricManagePage() {
   const router = useRouter();
-  const [items, setItems]     = useState<Accessory[]>([]);
+  const [items, setItems]     = useState<Fabric[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [lotMap, setLotMap] = useState<Map<string, Lot[]>>(new Map());
+  const [lotMap, setLotMap] = useState<Map<string, FabricLot[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
   const [filterType, setFilterType]   = useState("");
@@ -196,18 +199,16 @@ export default function ManagePage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  // Gate for in-place stock editing (overwrite → new lot). Hard-enabled for now;
-  // a separate admin-auth page will drive this later. Flip to false to restore
-  // the read-only price-history view in the edit modal.
+  // Gate for in-place stock editing (overwrite → new lot). Mirrors the accessory
+  // manage page; flip to false to restore the read-only price-history view.
   const stockEditEnabled = true;
 
-  // Auth gate
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireRole("fabric");
 
   useEffect(() => {
     if (!authed) return;
-    Promise.all([getAccessories(), getSuppliers(), getLotMap()])
-      .then(([accs, sups, lm]) => { setItems(accs); setSuppliers(sups); setLotMap(lm); })
+    Promise.all([getFabrics(), getSuppliers(), getFabricLotMap()])
+      .then(([fabs, sups, lm]) => { setItems(fabs); setSuppliers(sups); setLotMap(lm); })
       .finally(() => setLoading(false));
   }, [authed]);
 
@@ -216,24 +217,28 @@ export default function ManagePage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const refresh = () => Promise.all([getAccessories(), getLotMap()]).then(([a, lm]) => { setItems(a); setLotMap(lm); });
-  const types   = Array.from(new Set(items.map((i) => i.type))).sort();
+  const refresh = () => Promise.all([getFabrics(), getFabricLotMap()]).then(([f, lm]) => { setItems(f); setLotMap(lm); });
+  const types        = Array.from(new Set(items.map((i) => i.fabric_type).filter(Boolean))).sort();
+  const compositions = Array.from(new Set(items.map((i) => i.composition).filter(Boolean))).sort();
+  const constructions = Array.from(new Set(items.map((i) => i.construction).filter(Boolean))).sort();
 
   const filtered = useMemo(() => items.filter((i) => {
     if (!showInactive && !i.is_active) return false;
-    if (filterType && i.type !== filterType) return false;
+    if (filterType && i.fabric_type !== filterType) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     const supName = (suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "").toLowerCase();
     return (
-      i.type.toLowerCase().includes(q) ||
-      i.acc_code.toLowerCase().includes(q) ||
-      i.description.toLowerCase().includes(q) ||
+      i.fabric_type.toLowerCase().includes(q) ||
+      i.composition.toLowerCase().includes(q) ||
+      i.construction.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
-      i.size.toLowerCase().includes(q) ||
+      i.width.toLowerCase().includes(q) ||
+      i.fabric_code.toLowerCase().includes(q) ||
+      i.row_label.toLowerCase().includes(q) ||
       supName.includes(q)
     );
-  }).sort(compareAccessory), [items, suppliers, search, filterType, showInactive]);
+  }).sort(compareFabric), [items, suppliers, search, filterType, showInactive]);
 
   const pg = usePagination(filtered, `${search}|${filterType}|${showInactive}`);
 
@@ -256,11 +261,10 @@ export default function ManagePage() {
     setSaving(true);
     try {
       const ids = Array.from(selected);
-      const { deleted, blocked } = await bulkDeleteAccessories(ids);
+      const { deleted, blocked } = await bulkDeleteFabrics(ids);
       await refresh();
       setSelected(new Set());
       if (blocked.length > 0) {
-        // Keep the blocked ids so the modal can offer deactivation
         setBulkModal({ blocked });
         showToast(`ลบแล้ว ${deleted.length} · ลบไม่ได้ ${blocked.length} รายการ (มีประวัติธุรกรรม)`, "error");
       } else {
@@ -274,7 +278,7 @@ export default function ManagePage() {
   const runBulkDeactivate = async (ids: string[]) => {
     setSaving(true);
     try {
-      await bulkDeactivateAccessories(ids);
+      await bulkDeactivateFabrics(ids);
       await refresh();
       setBulkModal(null);
       setSelected(new Set());
@@ -285,16 +289,18 @@ export default function ManagePage() {
   };
 
   const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
-  const openEdit = (item: Accessory) => {
+  const openEdit = (item: Fabric) => {
     setEditId(item.id);
     // Stock lives in lots — seed the editable field from the lot-derived total
-    // (what the table shows), not the accessory's mirror column.
+    // (what the table shows), not the fabric's mirror column.
     const curStock = stockFromLots(lotMap.get(item.id) ?? []);
     setForm({
-      type: item.type, acc_code: item.acc_code, description: item.description,
-      row: item.row, color: item.color, size: item.size, quantity: curStock,
-      unit: item.unit, unit_cost: item.unit_cost, min_quantity: item.min_quantity,
-      supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo", is_active: item.is_active ?? true,
+      fabric_type: item.fabric_type, composition: item.composition, construction: item.construction,
+      color: item.color, width: item.width, weight: item.weight, weight_unit: item.weight_unit,
+      row_label: item.row_label, fabric_code: item.fabric_code, quantity: curStock,
+      unit: item.unit, unit_cost: item.unit_cost, cost_unit: item.cost_unit, min_quantity: item.min_quantity,
+      supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo",
+      is_active: item.is_active ?? true,
     });
     setFormErrors({});
     setShowModal(true);
@@ -306,23 +312,23 @@ export default function ManagePage() {
     setSaving(true);
     try {
       if (editId) {
-        await updateAccessory(editId, form);
+        await updateFabric(editId, form);
         // Overwrite stock: if the quantity was changed, rebuild the item's lots
-        // as a single opening lot at the entry's price (see overwriteStock).
+        // as a single opening lot at the entry's price.
         if (stockEditEnabled) {
           const curStock = stockFromLots(lotMap.get(editId) ?? []);
           if (Number(form.quantity) !== curStock) {
-            await overwriteStock(editId, Number(form.quantity), Number(form.unit_cost) || 0);
+            await overwriteFabricStock(editId, Number(form.quantity), Number(form.unit_cost) || 0);
           }
         }
         showToast("อัพเดตแล้ว ✓", "success");
       } else {
-        const created = await addAccessory(form);
-        // If an initial stock was entered, seed it as an opening lot so it
-        // shows up under the lot model (stock is derived from lots).
+        const created = await addFabric(form);
+        // If an initial stock was entered, seed it as an opening lot so it shows
+        // up under the lot model (stock is derived from lots).
         if (Number(form.quantity) > 0) {
-          await createLot({
-            accessory_id: created.id,
+          await createFabricLot({
+            fabric_id: created.id,
             quantity: Number(form.quantity),
             unit_cost: Number(form.unit_cost) || 0,
             source: "MIGRATION",
@@ -343,7 +349,7 @@ export default function ManagePage() {
   const handleDelete = async (id: string) => {
     setSaving(true);
     try {
-      await deleteAccessory(id);
+      await deleteFabric(id);
       await refresh();
       setDeleteConfirm(null);
       showToast("ลบรายการแล้ว", "success");
@@ -365,8 +371,8 @@ export default function ManagePage() {
     <div>
       <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
         <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา…" style={{ flex:"1 1 200px" }} />
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width:"auto", minWidth:160 }}>
-          <option value="">ทุกประเภท</option>
+        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width:"auto", minWidth:160, maxWidth:260 }}>
+          <option value="">ทุกชนิดผ้า</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <button onClick={() => setShowInactive(!showInactive)}
@@ -393,26 +399,27 @@ export default function ManagePage() {
                   <th style={{ width:40, textAlign:"center" }}>
                     <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width:"auto", cursor:"pointer" }} />
                   </th>
-                  <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
+                  <th>ชนิดผ้า</th><th>เลขที่</th><th>เส้นใย</th><th>โครงสร้าง</th><th>สี</th><th>หน้าผ้า</th><th>แถว</th>
                   <th>ซัพพลายเออร์</th><th>สต็อค</th><th>หน่วย</th>
                   <th>ราคา</th><th>ขั้นต่ำ</th><th>สถานะ</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={14} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={15} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {pg.pageItems.map((item) => (
                   <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45, background: selected.has(item.id) ? "var(--bg4)" : undefined }}>
                     <td style={{ textAlign:"center" }}>
                       <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleRow(item.id)} style={{ width:"auto", cursor:"pointer" }} />
                     </td>
-                    <td><span className="tag">{item.type}</span></td>
-                    <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีรหัส</span>}</td>
-                    <td style={{ maxWidth:160 }}>{item.description || "—"}</td>
+                    <td style={{ maxWidth:200 }}><span className="tag">{item.fabric_type}</span></td>
+                    <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.fabric_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีเลขที่</span>}</td>
+                    <td style={{ maxWidth:140, color:"var(--text2)" }}>{item.composition || "—"}</td>
+                    <td style={{ maxWidth:140, color:"var(--text2)" }}>{item.construction || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
-                    <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
-                    <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>
+                    <td style={{ fontFamily:"var(--mono)", color:"var(--text2)" }}>{item.width || "—"}</td>
+                    <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row_label || "—"}</td>
                     <td style={{ fontSize:17, color:"var(--text2)" }}>{suppliers.find((s) => s.id === item.supplier_id)?.supplier_name || "—"}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{stockFromLots(lotMap.get(item.id) ?? []).toLocaleString()}</td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
@@ -421,7 +428,7 @@ export default function ManagePage() {
                     <td>
                       {item.is_active
                         ? <span style={{ fontSize:14, color:"var(--green)" }}>● ใช้งาน</span>
-                        : <span style={{ fontSize:14, color:"var(--red)" }}>○ เลิกผลิต</span>}
+                        : <span style={{ fontSize:14, color:"var(--red)" }}>○ เลิกใช้</span>}
                     </td>
                     <td>
                       <div style={{ display:"flex", gap:4 }}>
@@ -448,28 +455,24 @@ export default function ManagePage() {
             </div>
             <div className="modal-body">
 
-              {/* type + acc_code — both required */}
-              <div className="form-row form-grid form-grid-2">
-                <div>
-                  <label className="form-label">ชนิดอุปกรณ์ <span style={{color:"var(--red)"}}>*</span></label>
-                  <TypeCombobox
-                    value={form.type}
-                    onChange={(v) => f("type", v)}
-                    options={types}
-                    hasError={!!formErrors.type}
-                  />
-                  {formErrors.type && <div style={{fontSize:14,color:"var(--red)",marginTop:3}}>{formErrors.type}</div>}
-                </div>
-                <div>
-                  <label className="form-label">รหัสสินค้า</label>
-                  <input value={form.acc_code} onChange={(e) => f("acc_code", e.target.value)}
-                    placeholder="เช่น VC-32" />
-                </div>
+              <div className="form-row">
+                <label className="form-label">ชนิดผ้า <span style={{color:"var(--red)"}}>*</span></label>
+                <Combobox value={form.fabric_type} onChange={(v) => f("fabric_type", v)} options={types}
+                  placeholder="เช่น 100% Cotton Single Jersey 20/1" hasError={!!formErrors.fabric_type} />
+                {formErrors.fabric_type && <div style={{fontSize:14,color:"var(--red)",marginTop:3}}>{formErrors.fabric_type}</div>}
               </div>
 
-              <div className="form-row">
-                <label className="form-label">รายละเอียด</label>
-                <input value={form.description} onChange={(e) => f("description", e.target.value)} placeholder="รายละเอียดสินค้า" />
+              <div className="form-row form-grid form-grid-2">
+                <div>
+                  <label className="form-label">เส้นใย (Composition)</label>
+                  <Combobox value={form.composition} onChange={(v) => f("composition", v)} options={compositions}
+                    placeholder="เช่น 100% Cotton" />
+                </div>
+                <div>
+                  <label className="form-label">โครงสร้าง (Construction)</label>
+                  <Combobox value={form.construction} onChange={(v) => f("construction", v)} options={constructions}
+                    placeholder="เช่น Single Jersey" />
+                </div>
               </div>
 
               <div className="form-row">
@@ -484,35 +487,60 @@ export default function ManagePage() {
               <div className="form-row form-grid form-grid-3">
                 <div>
                   <label className="form-label">สี</label>
-                  <input value={form.color} onChange={(e) => f("color", e.target.value)} placeholder="เช่น สีดำ" />
+                  <input value={form.color} onChange={(e) => f("color", e.target.value)} placeholder="เช่น ครีม" />
                 </div>
                 <div>
-                  <label className="form-label">ขนาด</label>
-                  <input value={form.size} onChange={(e) => f("size", e.target.value)} placeholder="เช่น 5นิ้ว" />
+                  <label className="form-label">หน้าผ้า</label>
+                  <input value={form.width} onChange={(e) => f("width", e.target.value)} placeholder="เช่น 73.5 / 32T" />
                 </div>
                 <div>
-                  <label className="form-label">แถว (ด้าย)</label>
-                  <input type="number" value={form.row ?? ""}
-                    onChange={(e) => f("row", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" />
+                  <label className="form-label">แถว</label>
+                  <input value={form.row_label} onChange={(e) => f("row_label", e.target.value)} placeholder="เช่น A1" />
                 </div>
               </div>
 
-              <div className="form-row form-grid form-grid-2">
+              <div className="form-row form-grid form-grid-3">
                 <div>
-                  <label className="form-label">หน่วย <span style={{color:"var(--red)"}}>*</span></label>
+                  <label className="form-label">เลขที่</label>
+                  <input value={form.fabric_code} onChange={(e) => f("fabric_code", e.target.value)} placeholder="เช่น 147" />
+                </div>
+                <div>
+                  <label className="form-label">น้ำหนัก</label>
+                  <input type="number" step="any" value={form.weight}
+                    onChange={(e) => f("weight", parseFloat(e.target.value) || 0)} />
+                </div>
+                <div>
+                  <label className="form-label">หน่วยน้ำหนัก</label>
+                  <select value={form.weight_unit} onChange={(e) => f("weight_unit", e.target.value)}>
+                    <option value="">—</option>
+                    {WEIGHT_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-row form-grid form-grid-3">
+                <div>
+                  <label className="form-label">หน่วยสต็อค <span style={{color:"var(--red)"}}>*</span></label>
                   <select value={form.unit} onChange={(e) => f("unit", e.target.value)}>
-                    {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    {STOCK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="form-label">สต็อคขั้นต่ำ (แจ้งเตือน)</label>
-                  <input type="number" value={form.min_quantity}
+                  <label className="form-label">ราคาต่อหน่วย</label>
+                  <select value={form.cost_unit} onChange={(e) => f("cost_unit", e.target.value)}>
+                    <option value="">—</option>
+                    {STOCK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">สต็อคขั้นต่ำ</label>
+                  <input type="number" step="any" value={form.min_quantity}
                     onChange={(e) => f("min_quantity", parseFloat(e.target.value) || 0)} />
                 </div>
               </div>
 
               {!editId ? (
-                /* ADD: these seed the opening lot (stock + price live in lots, not the accessory row) */
+                /* ADD: these seed the opening lot (stock + price live in lots, not the fabric row) */
                 <div className="form-row form-grid form-grid-2">
                   <div>
                     <label className="form-label">ราคาซื้อเริ่มต้น (฿)</label>
@@ -521,15 +549,15 @@ export default function ManagePage() {
                   </div>
                   <div>
                     <label className="form-label">สต็อคเริ่มต้น</label>
-                    <input type="number" value={form.quantity}
+                    <input type="number" step="any" value={form.quantity}
                       onChange={(e) => f("quantity", parseFloat(e.target.value) || 0)}
                       style={formErrors.quantity ? {borderColor:"var(--red)"} : {}} />
                     {formErrors.quantity && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.quantity}</div>}
                   </div>
                 </div>
               ) : (
-                /* EDIT: when stock-editing is enabled, an editable stock+price field that
-                   OVERWRITES the lots on save; always followed by the lot / price history. */
+                /* EDIT: editable stock+price that OVERWRITES the lots on save, followed
+                   by the lot / price history. */
                 <>
                 {stockEditEnabled && (
                   <StockEditor
@@ -563,9 +591,7 @@ export default function ManagePage() {
                         </div>
                       </div>
                       <div style={{ fontSize:12, color:"var(--text3)", marginBottom:4 }}>
-                        {stockEditEnabled
-                          ? "ประวัติราคา / การรับเข้า (การแก้สต็อกด้านบนจะเขียนทับประวัตินี้)"
-                          : "ประวัติราคา / การรับเข้า — แก้สต็อกหรือราคาผ่านหน้า “บันทึกรายการ” (รับเข้า) เท่านั้น"}
+                        ประวัติราคา / การรับเข้า (การแก้สต็อกด้านบนจะเขียนทับประวัตินี้)
                       </div>
                       {history.length === 0 ? (
                         <div style={{ fontSize:14, color:"var(--text3)", padding:"6px 0" }}>ยังไม่มีล็อต (ยังไม่มีการรับเข้า)</div>
@@ -594,7 +620,7 @@ export default function ManagePage() {
               <div className="form-row">
                 <label className="form-label">สถานะรายการ</label>
                 <div style={{ display:"flex", gap:8 }}>
-                  {[{val:true,label:"● ใช้งาน"},{val:false,label:"○ เลิกผลิต"}].map((opt) => (
+                  {[{val:true,label:"● ใช้งาน"},{val:false,label:"○ เลิกใช้"}].map((opt) => (
                     <button key={String(opt.val)} onClick={() => f("is_active", opt.val)}
                       style={form.is_active === opt.val ? {
                         borderColor: opt.val ? "var(--green)" : "var(--red)",
@@ -628,10 +654,10 @@ export default function ManagePage() {
             </div>
             <div className="modal-body">
               <p style={{ color:"var(--text2)" }}>ต้องการลบ <strong style={{ color:"var(--text)" }}>
-                {items.find((i) => i.id === deleteConfirm)?.type} {items.find((i) => i.id === deleteConfirm)?.description}
+                {items.find((i) => i.id === deleteConfirm)?.fabric_type} {items.find((i) => i.id === deleteConfirm)?.color}
               </strong>?</p>
               <p style={{ fontSize:12, color:"var(--text3)", marginTop:8 }}>
-                ไม่สามารถลบได้หากมีประวัติรายการอ้างอิงอยู่ — ลองกดเลิกผลิตแทน
+                ไม่สามารถลบได้หากมีประวัติรายการอ้างอิงอยู่ — ลองกดเลิกใช้แทน
               </p>
             </div>
             <div className="modal-footer">

@@ -1,4 +1,5 @@
 import type { Accessory } from "@/lib/store";
+import type { Fabric } from "@/lib/fabric-store";
 
 // Ordering of garment sizes (smallest → largest). "XXL" and "2XL" share a rank
 // since the data uses both interchangeably.
@@ -29,3 +30,15 @@ export const compareAccessory = (a: Accessory, b: Accessory): number =>
   (a.description || "").localeCompare(b.description || "", "th", { numeric: true }) ||
   (a.color || "").localeCompare(b.color || "", "th", { numeric: true }) ||
   compareSize(a.size, b.size);
+
+// Canonical hierarchy for every fabric listing: ชนิดผ้า → โครงสร้าง → สี → หน้าผ้า → เลขที่.
+// Mirrors compareAccessory: kind first so a fabric's variants stay grouped, then the
+// discriminators in the order a person reads them off the shelf. `width` and
+// `fabric_code` are text but mostly numeric ("73.5", "32T", "147"), so numeric-aware
+// compare orders them naturally instead of lexically (147 after 23, not before).
+export const compareFabric = (a: Fabric, b: Fabric): number =>
+  (a.fabric_type || "").localeCompare(b.fabric_type || "", "th", { numeric: true }) ||
+  (a.construction || "").localeCompare(b.construction || "", "th", { numeric: true }) ||
+  (a.color || "").localeCompare(b.color || "", "th", { numeric: true }) ||
+  (a.width || "").localeCompare(b.width || "", "th", { numeric: true }) ||
+  (a.fabric_code || "").localeCompare(b.fabric_code || "", "th", { numeric: true });

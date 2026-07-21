@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import * as XLSX from "xlsx";
 import { createImportBatch } from "@/lib/store";
+import { useRequireRole } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 // Maps sheet columns to fields by HEADER NAME (not position), so the importer
@@ -64,16 +65,12 @@ function resolveColumns(headerRow: any[]): { index: Record<string, number>; miss
 
 export default function ImportPage() {
   const router = useRouter();
-  const [authed, setAuthed] = useState(false);
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  useEffect(() => {
-    if (sessionStorage.getItem("manage_auth") !== "1") router.replace("/login");
-    else setAuthed(true);
-  }, [router]);
+  const { authed } = useRequireRole("acc");
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });

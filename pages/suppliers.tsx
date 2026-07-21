@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, bulkDeleteSuppliers, type Supplier } from "@/lib/store";
+import { useRequireAuth } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -22,7 +23,6 @@ function validate(form: FormData): FormErrors {
 
 export default function SuppliersPage() {
   const router = useRouter();
-  const [authed, setAuthed]   = useState(false);
   const [items, setItems]     = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
@@ -37,14 +37,9 @@ export default function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  // Auth gate — same auth as manage page
-  useEffect(() => {
-    if (sessionStorage.getItem("manage_auth") !== "1") {
-      router.replace("/login");
-    } else {
-      setAuthed(true);
-    }
-  }, [router]);
+  // Auth gate — suppliers are shared, so ANY logged-in admin may edit them
+  // (accessory, fabric, or super), not just one section's.
+  const { authed } = useRequireAuth();
 
   useEffect(() => {
     if (!authed) return;

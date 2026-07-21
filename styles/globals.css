@@ -158,6 +158,9 @@ tr:hover td { background: var(--bg3); }
    and .app-hdr / .app-nav / .app-main / .app-date on the shell. */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .tx-grid   { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
+/* Section picker ("/"): two big tap targets, stacked on phones. */
+.home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.home-card:hover { border-color: var(--accent); transform: translateY(-2px); }
 
 /* Tablets (≈12" and below): tighten page padding. Stat cards stay 4-up here. */
 @media (max-width: 1024px) {
@@ -191,7 +194,8 @@ tr:hover td { background: var(--bg3); }
 
 /* Phones: hide the header date, collapse the English nav subtitles. */
 @media (max-width: 560px) {
-  .app-date { display: none; }
+  .home-grid { grid-template-columns: 1fr; }
+  .app-date, .app-role { display: none; }
   .app-nav a > span:last-child { display: none; }
   th { font-size: 12px; }
   td { font-size: 13px; }

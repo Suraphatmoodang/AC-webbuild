@@ -1,48 +1,41 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import * as XLSX from "xlsx";
-import { buildAccessoryMatchIndex, matchKeyForRow, applyStockUpdates, getSuppliers,
-  type Accessory, type Supplier, type UpdatableField } from "@/lib/store";
 import { useRequireRole } from "@/lib/auth";
+import * as XLSX from "xlsx";
+import { buildFabricMatchIndex, fabricMatchKeyForRow, applyFabricUpdates, getSuppliers,
+  type Fabric, type Supplier, type FabricUpdatableField } from "@/lib/fabric-store";
+import { parseFabricSheet, type FabricSheetRow } from "@/lib/fabric-sheet";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
-// Header-name → field mapping (same sheet layout as the importer)
-const HEADER_MAP: Record<string, string[]> = {
-  type: ["ชนิดอุปกรณ์"], acc_code: ["รหัสสินค้า"], description: ["รายละเอียด"],
-  color: ["สี"], size: ["ขนาด"], quantity: ["สต็อคคงเหลือ", "สต็อค"],
-  unit: ["หน่วย"], unit_cost: ["ราคาซื้อ"], min_quantity: ["ขั้นต่ำ"],
-  supplier_name: ["ชื่อบริษัทซัพ", "ชื่อบริษัทซัพพลายเออร์", "ซัพพลายเออร์"],
-};
-const normHeader = (v: any) => String(v ?? "").trim().replace(/\s+/g, " ");
-const str = (v: any) => (v === undefined || v === null ? "" : String(v).trim());
-const num = (v: any) => { const n = parseFloat(String(v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
-
-// Columns the user can choose to update (the "mode")
-const UPDATE_COLUMNS: { field: UpdatableField; label: string; sheetKey: string }[] = [
+// Columns the user can choose to update (the "mode"). `sheetKey` is the parsed-row
+// field that must be present in the file for the column to be selectable.
+const UPDATE_COLUMNS: { field: FabricUpdatableField; label: string; sheetKey: string }[] = [
   { field: "quantity",     label: "สต็อคคงเหลือ", sheetKey: "quantity" },
   { field: "min_quantity", label: "ขั้นต่ำ",       sheetKey: "min_quantity" },
-  { field: "unit_cost",    label: "ราคาซื้อ",      sheetKey: "unit_cost" },
+  { field: "unit_cost",    label: "ราคาต่อหน่วย",  sheetKey: "unit_cost" },
   { field: "unit",         label: "หน่วย",         sheetKey: "unit" },
-  { field: "acc_code",     label: "รหัสสินค้า",     sheetKey: "acc_code" },
-  { field: "description",  label: "รายละเอียด",    sheetKey: "description" },
+  { field: "cost_unit",    label: "หน่วยราคา",     sheetKey: "cost_unit" },
+  { field: "composition",  label: "เส้นใย",        sheetKey: "composition" },
+  { field: "construction", label: "โครงสร้าง",     sheetKey: "construction" },
+  { field: "weight",       label: "น้ำหนัก",       sheetKey: "weight" },
+  { field: "width",        label: "หน้าผ้า",       sheetKey: "width" },
+  { field: "row_label",    label: "แถว",           sheetKey: "row_label" },
   { field: "supplier",     label: "ซัพพลายเออร์",  sheetKey: "supplier_name" },
 ];
 
-type Row = {
-  type: string; acc_code: string; description: string; color: string; size: string;
-  quantity: number; unit_cost: number; min_quantity: number; unit: string; supplier_name: string;
+type Row = FabricSheetRow & {
   _match: "one" | "multi" | "none";
   _matchId?: string;
-  _matched?: Accessory;   // the single matched accessory (for "already up to date" checks)
+  _matched?: Fabric;   // the single matched fabric (for "already up to date" checks)
   _matchCount: number;
 };
 
-export default function StockUpdatePage() {
+export default function FabricStockUpdatePage() {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [sheetCols, setSheetCols] = useState<Set<string>>(new Set());
-  const [mode, setMode] = useState<Set<UpdatableField>>(new Set());
+  const [mode, setMode] = useState<Set<FabricUpdatableField>>(new Set());
   const [overwrite, setOverwrite] = useState(false); // apply even when values already match
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [fileName, setFileName] = useState("");
@@ -54,9 +47,9 @@ export default function StockUpdatePage() {
   const [result, setResult] = useState<null | { updated: number; failed: number }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireRole("fabric");
 
-  useEffect(() => { if (authed) getSuppliers().then(setSuppliers); }, [authed]);
+  useEffect(() => { if (authed) { getSuppliers().then(setSuppliers); } }, [authed]);
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3500);
@@ -72,43 +65,22 @@ export default function StockUpdatePage() {
       const raw: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
       if (raw.length < 2) { showToast("ไฟล์ว่างเปล่า", "error"); return; }
 
-      // Resolve columns by header
-      const headers = raw[0].map(normHeader);
-      const colIdx: Record<string, number> = {};
-      const present = new Set<string>();
-      for (const [field, labels] of Object.entries(HEADER_MAP)) {
-        const idx = headers.findIndex((h) => labels.some((l) => normHeader(l) === h));
-        colIdx[field] = idx;
-        if (idx >= 0) present.add(field);
-      }
-      setSheetCols(present);
+      const { rows: parsed, cols } = parseFabricSheet(raw);
+      setSheetCols(cols.present);
 
-      const g = (r: any[], f: string) => { const i = colIdx[f]; return i >= 0 ? r[i] : undefined; };
-
-      // Build match index over existing accessories
-      const index = await buildAccessoryMatchIndex();
-
-      const parsed: Row[] = raw.slice(1)
-        .filter((r) => str(g(r, "type")) || str(g(r, "description")))
-        .map((r) => {
-          const base = {
-            type: str(g(r, "type")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
-            color: str(g(r, "color")), size: str(g(r, "size")),
-            quantity: num(g(r, "quantity")), unit_cost: num(g(r, "unit_cost")),
-            min_quantity: num(g(r, "min_quantity")), unit: str(g(r, "unit")), supplier_name: str(g(r, "supplier_name")),
-          };
-          const key = matchKeyForRow(base);
-          const matches = index.get(key) ?? [];
-          const _match = matches.length === 0 ? "none" : matches.length === 1 ? "one" : "multi";
-          return { ...base, _match, _matchId: matches.length === 1 ? matches[0].id : undefined,
-            _matched: matches.length === 1 ? matches[0] : undefined, _matchCount: matches.length };
-        });
-      setRows(parsed);
-      // default mode: whatever updatable columns exist in the sheet, minus nothing preselected
+      // Build the match index over existing fabrics and tag each row with its result.
+      const index = await buildFabricMatchIndex();
+      const tagged: Row[] = parsed.map((base) => {
+        const matches = index.get(fabricMatchKeyForRow(base)) ?? [];
+        const _match = matches.length === 0 ? "none" : matches.length === 1 ? "one" : "multi";
+        return { ...base, _match, _matchId: matches.length === 1 ? matches[0].id : undefined,
+          _matched: matches.length === 1 ? matches[0] : undefined, _matchCount: matches.length };
+      });
+      setRows(tagged);
       setMode(new Set());
       setSelected(new Set());
       const counts = { one: 0, multi: 0, none: 0 } as Record<string, number>;
-      parsed.forEach((p) => counts[p._match]++);
+      tagged.forEach((p) => counts[p._match]++);
       showToast(`อ่านไฟล์: ตรงกัน ${counts.one} · ซ้ำ ${counts.multi} · ไม่พบ ${counts.none}`, "success");
     } catch (err: any) {
       showToast("อ่านไฟล์ไม่สำเร็จ: " + (err.message ?? ""), "error");
@@ -116,7 +88,36 @@ export default function StockUpdatePage() {
     }
   };
 
-  const toggleMode = (f: UpdatableField) => {
+  const supplierIdFor = (name: string): string | null => {
+    const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+    return suppliers.find((s) => norm(s.supplier_name) === norm(name))?.id ?? null;
+  };
+
+  // Would writing field `f` from this row actually change the matched fabric?
+  const sameStr = (a: string, b: string) => (a ?? "").trim() === (b ?? "").trim();
+  const fieldChanged = (r: Row, f: FabricUpdatableField): boolean => {
+    const a = r._matched;
+    if (!a) return true; // no baseline → treat as a change
+    switch (f) {
+      case "quantity":     return Number(a.quantity) !== r.quantity;
+      case "min_quantity": return Number(a.min_quantity) !== r.min_quantity;
+      case "unit_cost":    return Number(a.unit_cost) !== r.unit_cost;
+      case "weight":       return Number(a.weight) !== r.weight;
+      case "unit":         return !sameStr(a.unit, r.unit);
+      case "cost_unit":    return !sameStr(a.cost_unit, r.cost_unit);
+      case "composition":  return !sameStr(a.composition, r.composition);
+      case "construction": return !sameStr(a.construction, r.construction);
+      case "width":        return !sameStr(a.width, r.width);
+      case "row_label":    return !sameStr(a.row_label, r.row_label);
+      case "supplier": {
+        const sid = supplierIdFor(r.supplier_name);
+        if (sid == null) return false; // no matching supplier → current value left untouched
+        return sid !== (a.supplier_id ?? null);
+      }
+    }
+  };
+
+  const toggleMode = (f: FabricUpdatableField) => {
     const next = new Set(mode);
     next.has(f) ? next.delete(f) : next.add(f);
     setMode(next);
@@ -126,30 +127,6 @@ export default function StockUpdatePage() {
     setSelected((prev) => new Set(Array.from(prev).filter((i) => rows[i] && rows[i]._match === "one" && !noop(rows[i]))));
   };
 
-  const supplierIdFor = (name: string): string | null => {
-    const norm = (s: string) => s.trim().replace(/\s+/g, " ");
-    return suppliers.find((s) => norm(s.supplier_name) === norm(name))?.id ?? null;
-  };
-
-  // Would writing field `f` from this row actually change the matched accessory?
-  const sameStr = (a: string, b: string) => (a ?? "").trim() === (b ?? "").trim();
-  const fieldChanged = (r: Row, f: UpdatableField): boolean => {
-    const a = r._matched;
-    if (!a) return true; // no baseline → treat as a change
-    switch (f) {
-      case "quantity":     return Number(a.quantity) !== r.quantity;
-      case "min_quantity": return Number(a.min_quantity) !== r.min_quantity;
-      case "unit_cost":    return Number(a.unit_cost) !== r.unit_cost;
-      case "unit":         return !sameStr(a.unit, r.unit);
-      case "acc_code":     return !sameStr(a.acc_code, r.acc_code);
-      case "description":  return !sameStr(a.description, r.description);
-      case "supplier": {
-        const sid = supplierIdFor(r.supplier_name);
-        if (sid == null) return false; // no matching supplier → current value left untouched
-        return sid !== (a.supplier_id ?? null);
-      }
-    }
-  };
   // A row is a no-op when EVERY selected field already matches the current value.
   // Overwrite mode disables this so matched rows apply even when unchanged.
   const modeArr = Array.from(mode);
@@ -162,8 +139,8 @@ export default function StockUpdatePage() {
     if (hideUnmatched && r._match !== "one") return false;
     if (!search) return true;
     const q = search.toLowerCase();
-    return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
-      r.acc_code.toLowerCase().includes(q);
+    return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) ||
+      r.color.toLowerCase().includes(q) || r.fabric_code.toLowerCase().includes(q);
   });
 
   const pg = usePagination(visible, `${search}|${hideUnmatched}`, 250);
@@ -197,28 +174,27 @@ export default function StockUpdatePage() {
 
     setSaving(true);
     try {
-      // need current unit cost of each matched accessory for price fallback
-      const index = await buildAccessoryMatchIndex();
-      const byId = new Map<string, Accessory>();
-      Array.from(index.values()).forEach((arr) => arr.forEach((a) => byId.set(a.id, a)));
-
       const updates = chosen.map((r) => ({
-        accessory_id: r._matchId!,
+        fabric_id: r._matchId!,
         quantity: r.quantity,
         min_quantity: r.min_quantity,
         unit_cost: r.unit_cost,
-        description: r.description,
         unit: r.unit,
-        acc_code: r.acc_code,
-        // Only carry a supplier_id when the sheet name actually matches an
-        // existing supplier. No match → undefined so the store LEAVES the
-        // item's current supplier untouched (never silently clears it).
+        cost_unit: r.cost_unit,
+        composition: r.composition,
+        construction: r.construction,
+        weight: r.weight,
+        width: r.width,
+        row_label: r.row_label,
+        // Only carry a supplier_id when the sheet name actually matches an existing
+        // supplier. No match → undefined so the store LEAVES the item's current
+        // supplier untouched (never silently clears it).
         supplier_id: supplierIdFor(r.supplier_name) ?? undefined,
-        current_unit_cost: Number(byId.get(r._matchId!)?.unit_cost ?? 0),
+        current_unit_cost: Number(r._matched?.unit_cost ?? 0),
         sheet_has_price: sheetCols.has("unit_cost"),
       }));
 
-      const { updated, errors } = await applyStockUpdates(updates, fields);
+      const { updated, errors } = await applyFabricUpdates(updates, fields);
       setConfirm(false);
       setResult({ updated, failed: errors.length });
       // Remove applied rows from the list
@@ -241,7 +217,7 @@ export default function StockUpdatePage() {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>อัปเดตข้อมูลจาก Excel</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>อัปเดตข้อมูลผ้าจาก Excel</h2>
         <p style={{ color: "var(--text2)", fontSize: 15 }}>
           จับคู่กับรายการที่มีอยู่แล้วอัปเดตเฉพาะคอลัมน์ที่เลือก — ไม่สร้างรายการใหม่
         </p>
@@ -335,18 +311,19 @@ export default function StockUpdatePage() {
       {rows.length > 0 && (
         <div className="card" style={{ overflow: "hidden" }}>
           <div style={{ height: "58vh", overflowY: "auto", overflowX: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 1000 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 1100 }}>
               <colgroup>
-                <col style={{ width: "44px" }} /><col style={{ width: "13%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "18%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
-                <col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} /><col style={{ width: "11%" }} />
+                <col style={{ width: "44px" }} /><col style={{ width: "20%" }} /><col style={{ width: "6%" }} />
+                <col style={{ width: "14%" }} /><col style={{ width: "9%" }} /><col style={{ width: "7%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
+                <col style={{ width: "6%" }} /><col style={{ width: "11%" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                 <tr>
                   <th style={{ textAlign: "center", background: "var(--bg2)" }}>
                     <input type="checkbox" checked={allSel} onChange={toggleAll} style={{ width: "auto", cursor: "pointer" }} />
                   </th>
-                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
+                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ชนิดผ้า</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>เลขที่</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>โครงสร้าง</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน้าผ้า</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
                 </tr>
               </thead>
               <tbody>
@@ -359,10 +336,11 @@ export default function StockUpdatePage() {
                       <td style={{ textAlign: "center" }}>
                         {canSelect && <input type="checkbox" checked={sel} onChange={() => toggleRow(i)} style={{ width: "auto", cursor: "pointer" }} />}
                       </td>
-                      <td style={{ fontWeight: 500, wordBreak: "break-word" }}>{r.type}</td>
-                      <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.acc_code || "—"}</td>
-                      <td style={{ wordBreak: "break-word" }}>{r.description || "—"}</td>
+                      <td style={{ fontWeight: 500, wordBreak: "break-word" }}>{r.fabric_type}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.fabric_code || "—"}</td>
+                      <td style={{ wordBreak: "break-word", fontSize: 14, color: "var(--text2)" }}>{r.construction || "—"}</td>
                       <td style={{ fontSize: 14, color: "var(--text2)" }}>{r.color || "—"}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.width || "—"}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.quantity.toLocaleString()}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.min_quantity.toLocaleString()}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.unit_cost ? `฿${r.unit_cost.toFixed(2)}` : "—"}</td>
@@ -386,7 +364,7 @@ export default function StockUpdatePage() {
 
       <p style={{ marginTop: 12, fontSize: 14, color: "var(--text3)" }}>
         เลือกได้เฉพาะรายการที่ "ตรงกัน" · รายการ "ซ้ำ" หรือ "ไม่พบ" ต้องแก้ในหน้าจัดการ ·
-        จับคู่ด้วย ประเภท+รหัส+รายละเอียด+สี+ขนาด (หากมีรหัส) หรือ ประเภท+รายละเอียด+สี+ขนาด (หากไม่มีรหัส)
+        จับคู่ด้วย ชนิดผ้า+เลขที่+สี+หน้าผ้า (หากมีเลขที่) หรือ ชนิดผ้า+โครงสร้าง+สี+หน้าผ้า (หากไม่มีเลขที่)
       </p>
 
       {/* Confirmation */}
@@ -442,7 +420,7 @@ export default function StockUpdatePage() {
             </div>
             <div className="modal-footer">
               <button onClick={() => setResult(null)}>ปิด</button>
-              <button className="primary" onClick={() => router.push("/stock")}>ไปที่หน้าสต็อค</button>
+              <button className="primary" onClick={() => router.push("/fabrics")}>ไปที่หน้าสต็อคผ้า</button>
             </div>
           </div>
         </div>

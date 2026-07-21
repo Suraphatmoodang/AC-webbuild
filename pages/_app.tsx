@@ -3,6 +3,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
+import { readRole, endSession, roleCanAccess, ROLE_LABELS, type Role } from "@/lib/auth";
 import "@/styles/globals.css";
 
 // Show the tab logo only on deployed (Vercel) builds. NODE_ENV is "production"
@@ -10,8 +11,14 @@ import "@/styles/globals.css";
 // testing stays blank (default browser icon) while the live site shows the logo.
 const IS_DEPLOYED = process.env.NODE_ENV === "production";
 
-const NAV = [
-  { href: "/", label: "สต็อค", en: "Stock", auth: false },
+type NavItem = { href: string; label: string; en: string; auth: boolean };
+
+// Two independent sections, each with its own pages and its own nav. The only
+// page shared between them is Suppliers, which each section reaches through its
+// own route (/suppliers and /fabrics/suppliers render the same component) so the
+// nav never flips section under the user's feet.
+const NAV_ACC: NavItem[] = [
+  { href: "/stock", label: "สต็อค", en: "Stock", auth: false },
   { href: "/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", auth: true },
   { href: "/history", label: "ประวัติ", en: "History", auth: false },
   { href: "/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
@@ -21,23 +28,54 @@ const NAV = [
   { href: "/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", auth: true },
 ];
 
+const NAV_FABRIC: NavItem[] = [
+  { href: "/fabrics", label: "สต็อค", en: "Stock", auth: false },
+  { href: "/fabrics/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", auth: true },
+  { href: "/fabrics/history", label: "ประวัติ", en: "History", auth: false },
+  { href: "/fabrics/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
+  { href: "/fabrics/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", auth: true },
+  { href: "/fabrics/import-review", label: "นำเข้า", en: "Import 🔒", auth: true },
+  { href: "/fabrics/stock-update", label: "อัปเดตสต็อค", en: "Update 🔒", auth: true },
+  { href: "/fabrics/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", auth: true },
+];
+
+// "/" is the section picker and "/login" belongs to neither — both render bare
+// (logo only, no nav). Everything under /fabrics is the fabric section.
+function sectionFor(pathname: string): "acc" | "fabric" | "none" {
+  if (pathname === "/" || pathname === "/login") return "none";
+  return pathname.startsWith("/fabrics") ? "fabric" : "acc";
+}
+
+const TITLES = {
+  acc:    { code: "ACC",     word: "STOCK",    href: "/stock" },
+  fabric: { code: "ผ้า",     word: "FABRIC",   href: "/fabrics" },
+  none:   { code: "Apparel", word: "Creation", href: "/" },
+} as const;
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
-  const [authed, setAuthed] = useState(false);
+  const [role, setRole] = useState<Role | null>(null);
 
-  // Re-check auth on every route change so the Suppliers link appears after login
+  // Re-check the session on every route change so gated links appear right after login
   useEffect(() => {
-    const check = () => setAuthed(sessionStorage.getItem("manage_auth") === "1");
+    const check = () => setRole(readRole());
     check();
     router.events.on("routeChangeComplete", check);
     return () => router.events.off("routeChangeComplete", check);
   }, [router.events]);
 
-  const visibleNav = NAV.filter((n) => !n.auth || authed);
+  const authed = role !== null;
+  const section = sectionFor(router.pathname);
+  const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC : [];
+  // Gated links show only to someone who can actually open them: an accessory
+  // admin browsing the (public) fabric stock page sees no fabric admin links.
+  const canAdminHere = section !== "none" && roleCanAccess(role, section);
+  const visibleNav = nav.filter((n) => !n.auth || canAdminHere);
+  const title = TITLES[section];
 
   const logout = () => {
-    sessionStorage.removeItem("manage_auth");
-    setAuthed(false);
+    endSession();
+    setRole(null);
     router.push("/login");
   };
 
@@ -53,10 +91,17 @@ export default function App({ Component, pageProps }: AppProps) {
         position: "sticky", top: 0, zIndex: 50,
       }}>
         <div className="app-hdr" style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 20, height: 70 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>ACC</span>
-            <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>STOCK</span>
-          </div>
+          <Link href={title.href} style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>{title.code}</span>
+            <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>{title.word}</span>
+          </Link>
+          {/* Back to the section picker — only meaningful once inside a section */}
+          {section !== "none" && (
+            <Link href="/" title="เลือกระบบ" aria-label="เลือกระบบ"
+              style={{ fontSize: 18, color: "var(--text3)", padding: "2px 6px", lineHeight: 1 }}>
+              ⇄
+            </Link>
+          )}
           <nav className="app-nav" style={{ display: "flex", gap: 2, flex: 1 }}>
             {visibleNav.map((n) => {
               const active = router.pathname === n.href;
@@ -83,6 +128,13 @@ export default function App({ Component, pageProps }: AppProps) {
           <span className="app-date" style={{ fontSize: 16, color: "var(--text3)", fontFamily: "var(--mono)" }}>
             {new Date().toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" })}
           </span>
+          {role && (
+            <span className="app-role" title={ROLE_LABELS[role].en}
+              style={{ fontSize: 13, color: "var(--text2)", background: "var(--bg3)", border: "1px solid var(--border)",
+                borderRadius: "var(--r)", padding: "3px 8px", whiteSpace: "nowrap" }}>
+              {ROLE_LABELS[role].th}
+            </span>
+          )}
           {authed && (
             <button className="ghost" onClick={logout} title="ออกจากระบบ" aria-label="ออกจากระบบ"
               style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "6px 8px", color: "var(--text3)" }}>
