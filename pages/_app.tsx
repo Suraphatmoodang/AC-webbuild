@@ -56,7 +56,7 @@ function sectionFor(pathname: string): "acc" | "fabric" | "none" {
 const TITLES = {
   acc:    { code: "ACC",     word: "STOCK",    href: "/stock" },
   fabric: { code: "ผ้า",     word: "FABRIC",   href: "/fabrics" },
-  none:   { code: "Apparel", word: "Creation", href: "/" },
+  none:   { code: "Apparel", word: "Creations", href: "/" },
 } as const;
 
 export default function App({ Component, pageProps }: AppProps) {
