@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, getSuppliers, stageAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Supplier, type ImportRow, type Lot } from "@/lib/store";
-import { useSession, roleCanAccess } from "@/lib/auth";
+import { useSession, roleCan } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareAccessory } from "@/lib/sort";
@@ -32,7 +32,7 @@ export default function StockPage() {
   // Public page — the session only decides whether the "edit in manage" shortcut
   // shows, and only an accessory-side admin can follow it.
   const { role } = useSession();
-  const authed = roleCanAccess(role, "acc");
+  const canManage = roleCan(role, "acc", "admin");   // manage is super-only now
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<AddForm>(emptyAdd());
   const [addErr, setAddErr] = useState("");
@@ -284,7 +284,7 @@ export default function StockPage() {
               })()}
             </div>
             <div className="modal-footer">
-              {authed && (
+              {canManage && (
                 <button onClick={() => { setViewItem(null); router.push("/manage"); }}>แก้ไขในหน้าจัดการ</button>
               )}
               <button className="primary" onClick={() => setViewItem(null)}>ปิด</button>

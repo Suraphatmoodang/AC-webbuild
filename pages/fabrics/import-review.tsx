@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { getPendingFabricImports, approveFabricImports, rejectFabricImports, getFabricDuplicateMap,
   getSuppliers, updateFabricImportRow,
   type FabricImportRow, type Fabric, type Supplier } from "@/lib/fabric-store";
@@ -31,7 +31,7 @@ export default function FabricImportReviewPage() {
   const [completion, setCompletion] = useState<null | { added: number; overwritten: number; failed: number; errors: string[] }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("fabric");
+  const { authed } = useRequireAccess("fabric", "admin");
 
   const load = () => {
     setLoading(true);

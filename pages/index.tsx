@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import { getAccessories, getLotMap, valueFromLots as accValue } from "@/lib/store";
 import { getFabrics, getFabricLotMap, valueFromLots as fabValue } from "@/lib/fabric-store";
-import { useSession, roleCanAccess, ROLE_LABELS, type Section } from "@/lib/auth";
+import { useSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
 
 // Section picker. The two stock systems (อุปกรณ์ / ผ้า) are fully independent —
 // separate tables, separate pages, separate logs — and share only Suppliers.
@@ -35,7 +35,7 @@ export default function HomePage() {
   const [acc, setAcc] = useState<Stat>(null);
   const [fab, setFab] = useState<Stat>(null);
 
-  // useRequireRole bounces here with ?denied=<section> when a section admin opens
+  // useRequireAccess bounces here with ?denied=<section> when a role opens
   // the other section's admin pages. Both stock pages stay publicly viewable, so
   // this only ever means "you can't MANAGE that side".
   const denied = typeof router.query.denied === "string" ? router.query.denied : null;
@@ -85,15 +85,20 @@ export default function HomePage() {
       <div className="home-grid">
         {SECTIONS.map((s) => {
           const st = stats[s.href];
-          const canAdmin = roleCanAccess(role, s.section);
+          // Three states, because access has two axes: super can do admin work
+          // (manage/import/updater/log), acc|fabric|audit can do ops work
+          // (transactions/suppliers) on their section, everyone else just looks.
+          const canAdmin = roleCan(role, s.section, "admin");
+          const canOps   = roleCan(role, s.section, "ops");
+          const badge = canAdmin ? "จัดการได้" : canOps ? "บันทึกได้" : "ดูอย่างเดียว";
           return (
             <Link key={s.href} href={s.href} className="card home-card"
               style={{ display: "block", padding: 24, transition: "border-color 0.15s, transform 0.15s" }}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontSize: 21, fontWeight: 500 }}>{s.title}</div>
                 {role && (
-                  <span style={{ fontSize: 12, color: canAdmin ? "var(--green)" : "var(--text3)", whiteSpace: "nowrap" }}>
-                    {canAdmin ? "จัดการได้" : "ดูอย่างเดียว"}
+                  <span style={{ fontSize: 12, color: canAdmin ? "var(--green)" : canOps ? "var(--accent)" : "var(--text3)", whiteSpace: "nowrap" }}>
+                    {badge}
                   </span>
                 )}
               </div>

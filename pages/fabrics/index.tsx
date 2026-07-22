@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getFabrics, getSuppliers, stageFabric, getFabricLotMap, stockFromLots, valueFromLots,
   type Fabric, type Supplier, type FabricImportRow, type FabricLot } from "@/lib/fabric-store";
-import { useSession, roleCanAccess } from "@/lib/auth";
+import { useSession, roleCan } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareFabric } from "@/lib/sort";
@@ -33,7 +33,7 @@ export default function FabricStockPage() {
   // Public page — the session only decides whether the "edit in manage" shortcut
   // shows, and only a fabric-side admin can follow it.
   const { role } = useSession();
-  const authed = roleCanAccess(role, "fabric");
+  const canManage = roleCan(role, "fabric", "admin");   // manage is super-only now
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<AddForm>(emptyAdd());
   const [addErr, setAddErr] = useState("");
@@ -293,7 +293,7 @@ export default function FabricStockPage() {
               })()}
             </div>
             <div className="modal-footer">
-              {authed && (
+              {canManage && (
                 <button onClick={() => { setViewItem(null); router.push("/fabrics/manage"); }}>แก้ไขในหน้าจัดการ</button>
               )}
               <button className="primary" onClick={() => setViewItem(null)}>ปิด</button>

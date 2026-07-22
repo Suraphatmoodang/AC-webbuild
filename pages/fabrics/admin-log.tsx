@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { getApprovedFabricImports, getFabricTransactions, getFabrics, getSuppliers,
   getFabricLotMap, valueFromLots,
   type FabricImportRow, type FabricTransaction, type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
@@ -37,7 +37,7 @@ export default function FabricAdminLogPage() {
   const [txFilter, setTxFilter] = useState<"all" | "IN" | "OUT" | "ADJUST" | "RETURN">("all");
   const [search, setSearch] = useState("");
 
-  const { authed } = useRequireRole("fabric");
+  const { authed } = useRequireAccess("fabric", "admin");
 
   useEffect(() => {
     if (!authed) return;

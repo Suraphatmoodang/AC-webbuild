@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addTransaction, revertTransaction, getTransactionsByAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot, type Transaction } from "@/lib/store";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { compareAccessory } from "@/lib/sort";
@@ -27,25 +27,27 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
   );
 }
 
-// Who recorded the transaction. Currently ONE fixed user, but structured so it can
-// later become a dropdown (extend RECORDERS) or a free-text field — flip
-// `recorderPickerEnabled` to true. Same gate pattern as StockEditor / txRevert.
-const RECORDERS = ["เตือน"];             // roster of possible recorders (currently one)
-const recorderPickerEnabled = false;     // false → fixed read-only; true → dropdown
+// Who recorded the transaction (ผู้บันทึก). Defaults to the usual person on this
+// side, but the field is free text — anyone else can simply be typed in. RECORDERS
+// only supplies the dropdown suggestions; add names here as the roster grows.
+// The chosen name PERSISTS across consecutive entries (the post-save reset
+// deliberately leaves `by` alone), so a long recording session isn't retyped.
+const RECORDERS = ["เตือน"];
 
 function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  if (!recorderPickerEnabled) {
-    return (
-      <div style={{ padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: "var(--r)", color: "var(--text2)" }}>
-        {value}
-      </div>
-    );
-  }
-  // Future: pick from the roster. Swap this <select> for an <input> for free text.
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
-      {RECORDERS.map((r) => <option key={r} value={r}>{r}</option>)}
-    </select>
+    <>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        list="acc-recorders"
+        placeholder={RECORDERS[0]}
+        autoComplete="off"
+      />
+      <datalist id="acc-recorders">
+        {RECORDERS.map((r) => <option key={r} value={r} />)}
+      </datalist>
+    </>
   );
 }
 
@@ -72,7 +74,7 @@ export default function TransactionsPage() {
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   // Auth gate — transactions is now protected
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireAccess("acc", "ops");
 
   useEffect(() => {
     if (!authed) return;

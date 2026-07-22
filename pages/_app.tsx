@@ -3,7 +3,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
-import { readRole, endSession, roleCanAccess, ROLE_LABELS, type Role } from "@/lib/auth";
+import { readRole, endSession, roleCan, ROLE_LABELS, type Role, type Area } from "@/lib/auth";
 import "@/styles/globals.css";
 
 // Show the tab logo only on deployed (Vercel) builds. NODE_ENV is "production"
@@ -11,7 +11,13 @@ import "@/styles/globals.css";
 // testing stays blank (default browser icon) while the live site shows the logo.
 const IS_DEPLOYED = process.env.NODE_ENV === "production";
 
-type NavItem = { href: string; label: string; en: string; auth: boolean };
+// `area` undefined = public page, never gated. Otherwise it must match the gate
+// the page itself declares via useRequireAccess — keep the two in step.
+// `guest` = still shown to LOGGED-OUT users even though it's gated, so there is a
+// visible way in: clicking it is what triggers the login prompt. Exactly one item
+// per section carries this, otherwise the nav is cluttered for ordinary staff who
+// only ever view stock.
+type NavItem = { href: string; label: string; en: string; area?: Area; guest?: boolean };
 
 // Two independent sections, each with its own pages, its own nav and its own data
 // — including suppliers, which are now separate tables per section. /suppliers and
@@ -19,25 +25,25 @@ type NavItem = { href: string; label: string; en: string; auth: boolean };
 // stores, so each section keeps its own route and the nav never flips section
 // under the user's feet.
 const NAV_ACC: NavItem[] = [
-  { href: "/stock", label: "สต็อค", en: "Stock", auth: false },
-  { href: "/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", auth: true },
-  { href: "/history", label: "ประวัติ", en: "History", auth: false },
-  { href: "/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
-  { href: "/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", auth: true },
-  { href: "/import-review", label: "นำเข้า", en: "Import 🔒", auth: true },
-  { href: "/stock-update", label: "อัปเดตสต็อค", en: "Update 🔒", auth: true },
-  { href: "/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", auth: true },
+  { href: "/stock", label: "สต็อค", en: "Stock" },
+  { href: "/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", area: "ops", guest: true },
+  { href: "/history", label: "ประวัติ", en: "History" },
+  { href: "/manage", label: "จัดการ", en: "Manage 🔒", area: "admin" },
+  { href: "/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", area: "ops" },
+  { href: "/import-review", label: "นำเข้า", en: "Import 🔒", area: "admin" },
+  { href: "/stock-update", label: "อัปเดตสต็อค", en: "Update 🔒", area: "admin" },
+  { href: "/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", area: "admin" },
 ];
 
 const NAV_FABRIC: NavItem[] = [
-  { href: "/fabrics", label: "สต็อค", en: "Stock", auth: false },
-  { href: "/fabrics/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", auth: true },
-  { href: "/fabrics/history", label: "ประวัติ", en: "History", auth: false },
-  { href: "/fabrics/manage", label: "จัดการ", en: "Manage 🔒", auth: false },
-  { href: "/fabrics/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", auth: true },
-  { href: "/fabrics/import-review", label: "นำเข้า", en: "Import 🔒", auth: true },
-  { href: "/fabrics/stock-update", label: "อัปเดตสต็อค", en: "Update 🔒", auth: true },
-  { href: "/fabrics/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", auth: true },
+  { href: "/fabrics", label: "สต็อค", en: "Stock" },
+  { href: "/fabrics/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", area: "ops", guest: true },
+  { href: "/fabrics/history", label: "ประวัติ", en: "History" },
+  { href: "/fabrics/manage", label: "จัดการ", en: "Manage 🔒", area: "admin" },
+  { href: "/fabrics/suppliers", label: "ซัพพลายเออร์", en: "Suppliers 🔒", area: "ops" },
+  { href: "/fabrics/import-review", label: "นำเข้า", en: "Import 🔒", area: "admin" },
+  { href: "/fabrics/stock-update", label: "อัปเดตสต็อค", en: "Update 🔒", area: "admin" },
+  { href: "/fabrics/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", area: "admin" },
 ];
 
 // "/" is the section picker and "/login" belongs to neither — both render bare
@@ -68,10 +74,17 @@ export default function App({ Component, pageProps }: AppProps) {
   const authed = role !== null;
   const section = sectionFor(router.pathname);
   const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC : [];
-  // Gated links show only to someone who can actually open them: an accessory
-  // admin browsing the (public) fabric stock page sees no fabric admin links.
-  const canAdminHere = section !== "none" && roleCanAccess(role, section);
-  const visibleNav = nav.filter((n) => !n.auth || canAdminHere);
+  // Nav visibility:
+  //  · public items (no `area`) always show — viewing stock never needs a login.
+  //  · LOGGED OUT: gated items still show, so clicking one is what triggers the
+  //    login prompt. Nothing auto-prompts; the gate appears on demand.
+  //  · LOGGED IN: only what this role can actually open, so an accessory admin
+  //    sees no admin links and no fabric-section links.
+  const visibleNav = nav.filter((n) => {
+    if (!n.area) return true;                 // public: viewing stock never needs a login
+    if (role === null) return !!n.guest;      // logged out: ONLY the guest entry point
+    return section !== "none" && roleCan(role, section, n.area);
+  });
   const title = TITLES[section];
 
   const logout = () => {

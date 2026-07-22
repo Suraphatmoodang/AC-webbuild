@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, bulkDeleteSuppliers, type Supplier } from "@/lib/store";
-import { useRequireRole, type Section } from "@/lib/auth";
+import { useRequireAccess, type Section } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -50,9 +50,9 @@ export function SuppliersView({ api, section }: { api: SupplierApi; section: Sec
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  // Auth gate — each section owns its own supplier list now, so this is scoped to
-  // the section that rendered it (super passes both).
-  const { authed } = useRequireRole(section);
+  // Auth gate — suppliers are "ops" work, so the section admin, the auditor (both
+  // sections) and super can all open it. Scoped to whichever section rendered it.
+  const { authed } = useRequireAccess(section, "ops");
 
   useEffect(() => {
     if (!authed) return;

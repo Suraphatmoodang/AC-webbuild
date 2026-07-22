@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { getFabrics, addFabricTransaction, revertFabricTransaction, getFabricTransactionsByFabric,
   getFabricLotMap, stockFromLots, valueFromLots,
   type Fabric, type FabricLot, type FabricTransaction } from "@/lib/fabric-store";
@@ -30,23 +30,27 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
   );
 }
 
-// Who recorded the transaction. Currently ONE fixed user, but structured so it can
-// later become a dropdown (extend RECORDERS) — flip `recorderPickerEnabled` to true.
-const RECORDERS = ["เตือน"];
-const recorderPickerEnabled = false;
+// Who recorded the transaction (ผู้บันทึก). Defaults to the usual person on this
+// side, but the field is free text — anyone else can simply be typed in. RECORDERS
+// only supplies the dropdown suggestions; add names here as the roster grows.
+// The chosen name PERSISTS across consecutive entries (the post-save reset
+// deliberately leaves `by` alone), so a long recording session isn't retyped.
+const RECORDERS = ["กระแต"];
 
 function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  if (!recorderPickerEnabled) {
-    return (
-      <div style={{ padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: "var(--r)", color: "var(--text2)" }}>
-        {value}
-      </div>
-    );
-  }
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
-      {RECORDERS.map((r) => <option key={r} value={r}>{r}</option>)}
-    </select>
+    <>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        list="fab-recorders"
+        placeholder={RECORDERS[0]}
+        autoComplete="off"
+      />
+      <datalist id="fab-recorders">
+        {RECORDERS.map((r) => <option key={r} value={r} />)}
+      </datalist>
+    </>
   );
 }
 
@@ -71,7 +75,7 @@ export default function FabricTransactionsPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("fabric");
+  const { authed } = useRequireAccess("fabric", "ops");
 
   useEffect(() => {
     if (!authed) return;

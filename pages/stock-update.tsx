@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import * as XLSX from "xlsx";
 import { buildAccessoryMatchIndex, matchKeyForRow, applyStockUpdates, getSuppliers,
   type Accessory, type Supplier, type UpdatableField } from "@/lib/store";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -54,7 +54,7 @@ export default function StockUpdatePage() {
   const [result, setResult] = useState<null | { updated: number; failed: number }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireAccess("acc", "admin");
 
   useEffect(() => { if (authed) getSuppliers().then(setSuppliers); }, [authed]);
 

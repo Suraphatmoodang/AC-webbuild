@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getPendingImports, approveImports, rejectImports, getDuplicateMap, getSuppliers, updateImportRow,
   type ImportRow, type Accessory, type Supplier } from "@/lib/store";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -29,7 +29,7 @@ export default function ImportReviewPage() {
   const [completion, setCompletion] = useState<null | { added: number; overwritten: number; failed: number; errors: string[] }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireAccess("acc", "admin");
 
   const load = () => {
     setLoading(true);

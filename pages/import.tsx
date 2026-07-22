@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import * as XLSX from "xlsx";
 import { createImportBatch } from "@/lib/store";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 // Maps sheet columns to fields by HEADER NAME (not position), so the importer
@@ -70,7 +70,7 @@ export default function ImportPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireAccess("acc", "admin");
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });

@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addAccessory, updateAccessory, deleteAccessory, getSuppliers, bulkDeleteAccessories, bulkDeactivateAccessories, getLotMap, stockFromLots, valueFromLots, createLot, overwriteStock, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { SearchInput } from "@/lib/search";
 import { compareAccessory } from "@/lib/sort";
 import { numOr, numInput, DEFAULT_MIN_QTY, type NumField } from "@/lib/form-num";
@@ -207,7 +207,7 @@ export default function ManagePage() {
   const stockEditEnabled = true;
 
   // Auth gate
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireAccess("acc", "admin");
 
   useEffect(() => {
     if (!authed) return;

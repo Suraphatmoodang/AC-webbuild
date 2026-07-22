@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { createFabricImportBatch } from "@/lib/fabric-store";
 import { parseFabricSheet, type FabricSheetRow } from "@/lib/fabric-sheet";
@@ -21,7 +21,7 @@ export default function FabricImportPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("fabric");
+  const { authed } = useRequireAccess("fabric", "admin");
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });

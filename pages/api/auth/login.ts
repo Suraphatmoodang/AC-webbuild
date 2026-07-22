@@ -4,9 +4,13 @@ import type { Role } from "@/lib/auth";
 // Accounts live in env vars — one pair per role. Set these in .env.local locally
 // and in the Vercel project settings for the deployed site:
 //
-//   ACC_ADMIN_USERNAME    / ACC_ADMIN_PASSWORD      → accessory system only
-//   FABRIC_ADMIN_USERNAME / FABRIC_ADMIN_PASSWORD   → fabric system only
-//   SUPER_ADMIN_USERNAME  / SUPER_ADMIN_PASSWORD    → both
+//   ACC_ADMIN_USERNAME    / ACC_ADMIN_PASSWORD      → accessory ops (transactions + suppliers)
+//   FABRIC_ADMIN_USERNAME / FABRIC_ADMIN_PASSWORD   → fabric ops (transactions + suppliers)
+//   AUDIT_USERNAME        / AUDIT_PASSWORD          → ops on BOTH sides, no admin pages
+//   SUPER_ADMIN_USERNAME  / SUPER_ADMIN_PASSWORD    → everything
+//
+// Only `super` may open manage / import / import-review / stock-update / admin-log.
+// See lib/auth.ts `roleCan` for the full rule.
 //
 // The original MANAGE_USERNAME / MANAGE_PASSWORD pair still works and is treated
 // as a super admin, so an existing deployment keeps logging in unchanged.
@@ -20,6 +24,7 @@ const ACCOUNTS: { role: Role; user?: string; pass?: string }[] = [
   { role: "super",  user: process.env.MANAGE_USERNAME,       pass: process.env.MANAGE_PASSWORD },
   { role: "acc",    user: process.env.ACC_ADMIN_USERNAME,    pass: process.env.ACC_ADMIN_PASSWORD },
   { role: "fabric", user: process.env.FABRIC_ADMIN_USERNAME, pass: process.env.FABRIC_ADMIN_PASSWORD },
+  { role: "audit",  user: process.env.AUDIT_USERNAME,        pass: process.env.AUDIT_PASSWORD },
 ];
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {

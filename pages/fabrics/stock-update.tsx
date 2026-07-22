@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { buildFabricMatchIndex, fabricMatchKeyForRow, applyFabricUpdates, getSuppliers,
   type Fabric, type Supplier, type FabricUpdatableField } from "@/lib/fabric-store";
@@ -47,7 +47,7 @@ export default function FabricStockUpdatePage() {
   const [result, setResult] = useState<null | { updated: number; failed: number }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireRole("fabric");
+  const { authed } = useRequireAccess("fabric", "admin");
 
   useEffect(() => { if (authed) { getSuppliers().then(setSuppliers); } }, [authed]);
 

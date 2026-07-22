@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { getFabrics, addFabric, updateFabric, deleteFabric, getSuppliers, bulkDeleteFabrics,
   bulkDeactivateFabrics, getFabricLotMap, stockFromLots, valueFromLots, createFabricLot, overwriteFabricStock,
   type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
@@ -209,7 +209,7 @@ export default function FabricManagePage() {
   // manage page; flip to false to restore the read-only price-history view.
   const stockEditEnabled = true;
 
-  const { authed } = useRequireRole("fabric");
+  const { authed } = useRequireAccess("fabric", "admin");
 
   useEffect(() => {
     if (!authed) return;

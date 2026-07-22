@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getApprovedImports, getTransactions, getAccessories, getSuppliers, getLotMap, valueFromLots,
   type ImportRow, type Transaction, type Accessory, type Supplier, type Lot } from "@/lib/store";
-import { useRequireRole } from "@/lib/auth";
+import { useRequireAccess } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -36,7 +36,7 @@ export default function AdminLogPage() {
   const [txFilter, setTxFilter] = useState<"all" | "IN" | "OUT" | "ADJUST" | "RETURN">("all");
   const [search, setSearch] = useState("");
 
-  const { authed } = useRequireRole("acc");
+  const { authed } = useRequireAccess("acc", "admin");
 
   useEffect(() => {
     if (!authed) return;
