@@ -13,10 +13,11 @@ const IS_DEPLOYED = process.env.NODE_ENV === "production";
 
 type NavItem = { href: string; label: string; en: string; auth: boolean };
 
-// Two independent sections, each with its own pages and its own nav. The only
-// page shared between them is Suppliers, which each section reaches through its
-// own route (/suppliers and /fabrics/suppliers render the same component) so the
-// nav never flips section under the user's feet.
+// Two independent sections, each with its own pages, its own nav and its own data
+// — including suppliers, which are now separate tables per section. /suppliers and
+// /fabrics/suppliers reuse the same VIEW component but are bound to different
+// stores, so each section keeps its own route and the nav never flips section
+// under the user's feet.
 const NAV_ACC: NavItem[] = [
   { href: "/stock", label: "สต็อค", en: "Stock", auth: false },
   { href: "/transactions", label: "บันทึกรายการ", en: "Transactions 🔒", auth: true },

@@ -1,13 +1,18 @@
 import { supabase } from "./supabase";
 
 // Fabric side (ผ้า) — an independent mirror of lib/store.ts over the `fabrics`,
-// `fabric_lots`, `fabric_transactions` and `fabric_imports` tables. Same lot-based
-// (FIFO/LIFO) model and staging→approval import flow as accessories, no shared rows.
-// Suppliers ARE shared: this module reuses the `suppliers` table and re-exports the
-// accessory store's supplier helpers so fabric pages don't need two imports.
-export {
-  getSuppliers, addSupplier, updateSupplier, deleteSupplier, type Supplier,
-} from "./store";
+// `fabric_lots`, `fabric_transactions`, `fabric_imports` and `fabric_suppliers`
+// tables. Same lot-based (FIFO/LIFO) model and staging→approval import flow as
+// accessories. NO rows are shared with the accessory side.
+//
+// Suppliers used to be the one shared table; they are now split — fabric suppliers
+// live in `fabric_suppliers` and are unrelated to the accessory `suppliers` rows.
+// The row SHAPE is identical, so the `Supplier` type is still re-used (type only,
+// no runtime coupling). The helpers below deliberately keep the same names as the
+// accessory store's, so a fabric page importing `getSuppliers` from THIS module
+// gets fabric suppliers.
+export type { Supplier } from "./store";
+import type { Supplier } from "./store";
 
 export type Fabric = {
   id: string;
@@ -25,7 +30,7 @@ export type Fabric = {
   unit_cost: number;        // reference price on the fabric (lots hold the real cost)
   cost_unit: string;        // หน่วยที่ราคาอิงอยู่
   min_quantity: number;
-  supplier_id: string | null;   // FK → suppliers.id (shared with accessories)
+  supplier_id: string | null;   // FK → fabric_suppliers.id (NOT the accessory suppliers table)
   valuation_method: "fifo" | "lifo";
   is_active: boolean;
   created_at: string;
@@ -97,6 +102,61 @@ export type FabricTransaction = {
   created_at: string;
   lot_effects?: FabricLotEffect | null;
 };
+
+// ── Fabric suppliers ─────────────────────────────────────
+// Independent of the accessory `suppliers` table — same columns, different rows.
+// Named to match the accessory store so fabric pages import `getSuppliers` and get
+// these. Mirrors lib/store.ts's supplier helpers.
+
+export async function getSuppliers(): Promise<Supplier[]> {
+  const all: Supplier[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("fabric_suppliers")
+      .select("*")
+      .order("supplier_name")
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return all;
+}
+
+export async function addSupplier(
+  input: Omit<Supplier, "id" | "created_at" | "updated_at">
+): Promise<Supplier> {
+  const { data, error } = await supabase.from("fabric_suppliers").insert(input).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSupplier(
+  id: string,
+  input: Partial<Omit<Supplier, "id" | "created_at" | "updated_at">>
+): Promise<Supplier> {
+  const { data, error } = await supabase
+    .from("fabric_suppliers").update(input).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteSupplier(id: string): Promise<void> {
+  const { error } = await supabase.from("fabric_suppliers").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function bulkDeleteSuppliers(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const { error } = await supabase.from("fabric_suppliers").delete().in("id", slice);
+    if (error) throw error;
+  }
+}
 
 // ── Fabrics ──────────────────────────────────────────────
 
@@ -492,8 +552,10 @@ export async function approveFabricImports(
   let approved = 0;
   let done = 0;
 
-  // Match supplier names against existing suppliers only — never auto-create.
-  const { data: existingSuppliers } = await supabase.from("suppliers").select("id, supplier_name");
+  // Match supplier names against existing FABRIC suppliers only — never auto-create.
+  // (Was matching the accessory `suppliers` table, which is why staged fabric rows
+  //  carrying a supplier_name never linked and left supplier_id null.)
+  const { data: existingSuppliers } = await supabase.from("fabric_suppliers").select("id, supplier_name");
   const supplierMap = new Map<string, string>(
     (existingSuppliers ?? []).map((s: any) => [normalizeForMatch(s.supplier_name), s.id])
   );

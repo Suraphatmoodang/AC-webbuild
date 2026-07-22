@@ -87,8 +87,11 @@ export function useRequireRole(section: Section): { authed: boolean; role: Role 
   return state;
 }
 
-// Gate for a page any logged-in admin may use, regardless of section. Suppliers is
-// the only one: the table is shared by both systems, so all three roles can edit it.
+// Gate for a page any logged-in admin may use, regardless of section.
+// CURRENTLY UNUSED: suppliers was the only such page, but accessory and fabric
+// suppliers are now separate tables and each page is section-scoped via
+// useRequireRole. Kept for the next genuinely cross-section page; delete if none
+// appears.
 export function useRequireAuth(): { authed: boolean; role: Role | null } {
   const router = useRouter();
   const [state, setState] = useState<{ authed: boolean; role: Role | null }>({ authed: false, role: null });

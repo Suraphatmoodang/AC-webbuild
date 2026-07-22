@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, bulkDeleteSuppliers, type Supplier } from "@/lib/store";
-import { useRequireAuth } from "@/lib/auth";
+import { useRequireRole, type Section } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
 type FormData = Omit<Supplier, "id" | "created_at" | "updated_at">;
+
+// Accessory and fabric suppliers are SEPARATE tables (`suppliers` /
+// `fabric_suppliers`) with identical shape — see lib/store.ts and lib/fabric-store.ts.
+// The UI is identical too, so this page is parameterised by its data source and
+// section instead of being duplicated: /suppliers renders it with the accessory
+// store, /fabrics/suppliers with the fabric store. Change supplier UI once, here.
+export type SupplierApi = {
+  list:       () => Promise<Supplier[]>;
+  add:        (input: FormData) => Promise<Supplier>;
+  update:     (id: string, input: Partial<FormData>) => Promise<Supplier>;
+  remove:     (id: string) => Promise<void>;
+  bulkRemove: (ids: string[]) => Promise<void>;
+};
 
 const emptyForm = (): FormData => ({
   supplier_code: "", supplier_name: "", contact_person: "", contact_number: "",
@@ -21,7 +34,7 @@ function validate(form: FormData): FormErrors {
   return errors;
 }
 
-export default function SuppliersPage() {
+export function SuppliersView({ api, section }: { api: SupplierApi; section: Section }) {
   const router = useRouter();
   const [items, setItems]     = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,13 +50,13 @@ export default function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  // Auth gate — suppliers are shared, so ANY logged-in admin may edit them
-  // (accessory, fabric, or super), not just one section's.
-  const { authed } = useRequireAuth();
+  // Auth gate — each section owns its own supplier list now, so this is scoped to
+  // the section that rendered it (super passes both).
+  const { authed } = useRequireRole(section);
 
   useEffect(() => {
     if (!authed) return;
-    getSuppliers().then(setItems).finally(() => setLoading(false));
+    api.list().then(setItems).finally(() => setLoading(false));
   }, [authed]);
 
   const showToast = (msg: string, type: "success" | "error") => {
@@ -51,7 +64,7 @@ export default function SuppliersPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const refresh = () => getSuppliers().then(setItems);
+  const refresh = () => api.list().then(setItems);
 
   const filtered = items.filter((i) => {
     if (!search) return true;
@@ -86,7 +99,7 @@ export default function SuppliersPage() {
     setSaving(true);
     try {
       const ids = Array.from(selected);
-      await bulkDeleteSuppliers(ids);
+      await api.bulkRemove(ids);
       await refresh();
       setSelected(new Set());
       setBulkConfirm(false);
@@ -115,8 +128,8 @@ export default function SuppliersPage() {
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setSaving(true);
     try {
-      if (editId) { await updateSupplier(editId, form); showToast("อัพเดตแล้ว ✓", "success"); }
-      else        { await addSupplier(form);            showToast("เพิ่มซัพพลายเออร์แล้ว ✓", "success"); }
+      if (editId) { await api.update(editId, form); showToast("อัพเดตแล้ว ✓", "success"); }
+      else        { await api.add(form);            showToast("เพิ่มซัพพลายเออร์แล้ว ✓", "success"); }
       await refresh();
       setShowModal(false);
     } catch (e: any) {
@@ -129,7 +142,7 @@ export default function SuppliersPage() {
   const handleDelete = async (id: string) => {
     setSaving(true);
     try {
-      await deleteSupplier(id);
+      await api.remove(id);
       await refresh();
       setDeleteConfirm(null);
       showToast("ลบซัพพลายเออร์แล้ว", "success");
@@ -399,5 +412,19 @@ export default function SuppliersPage() {
 
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
+  );
+}
+
+// Route: accessory suppliers (`suppliers` table). The fabric twin lives at
+// pages/fabrics/suppliers.tsx and renders the same view over `fabric_suppliers`.
+export default function AccessorySuppliersPage() {
+  return (
+    <SuppliersView
+      section="acc"
+      api={{
+        list: getSuppliers, add: addSupplier, update: updateSupplier,
+        remove: deleteSupplier, bulkRemove: bulkDeleteSuppliers,
+      }}
+    />
   );
 }
