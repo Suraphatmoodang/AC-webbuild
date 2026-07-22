@@ -15,7 +15,8 @@ type AddForm = {
 };
 const emptyAdd = (): AddForm => ({
   type: "", acc_code: "", description: "", row: "", color: "", size: "",
-  quantity: "0", unit: "เส้น", unit_cost: "0", supplier_id: "",
+  // numeric fields start blank so the greyed placeholder shows through (see lib/form-num)
+  quantity: "", unit: "เส้น", unit_cost: "", supplier_id: "",
 });
 
 export default function StockPage() {
@@ -294,8 +295,10 @@ export default function StockPage() {
 
       {/* Staged add modal */}
       {showAdd && (
-        <div className="modal-overlay" onClick={() => setShowAdd(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        /* No close-on-overlay-click: this form holds typed-in data, and an accidental
+           click outside used to discard it. Close via ✕ or ยกเลิก only. */
+        <div className="modal-overlay">
+          <div className="modal">
             <div className="modal-header">
               <div style={{ fontWeight: 500 }}>เพิ่มอุปกรณ์ (รอการอนุมัติ)</div>
               <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setShowAdd(false)}>✕</button>
@@ -338,8 +341,8 @@ export default function StockPage() {
                     {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
-                <div><label className="form-label">ราคาซื้อ (฿)</label><input type="number" step="0.01" value={addForm.unit_cost} onChange={(e) => af("unit_cost", e.target.value)} /></div>
-                <div><label className="form-label">สต็อคเริ่มต้น</label><input type="number" value={addForm.quantity} onChange={(e) => af("quantity", e.target.value)} /></div>
+                <div><label className="form-label">ราคาซื้อ (฿)</label><input type="number" step="0.01" value={addForm.unit_cost} onChange={(e) => af("unit_cost", e.target.value)} placeholder="0.00" /></div>
+                <div><label className="form-label">สต็อคเริ่มต้น</label><input type="number" value={addForm.quantity} onChange={(e) => af("quantity", e.target.value)} placeholder="0" /></div>
               </div>
               {addErr && <div style={{ color: "var(--red)", fontSize: 14, marginTop: 4 }}>{addErr}</div>}
             </div>

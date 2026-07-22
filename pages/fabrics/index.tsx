@@ -15,8 +15,9 @@ type AddForm = {
 };
 const emptyAdd = (): AddForm => ({
   fabric_type: "", composition: "", construction: "", color: "",
-  width: "", weight: "0", weight_unit: "gm2", row_label: "", fabric_code: "",
-  quantity: "0", unit: "กก", unit_cost: "0", cost_unit: "กก", supplier_id: "",
+  // numeric fields start blank so the greyed placeholder shows through (see lib/form-num)
+  width: "", weight: "", weight_unit: "gm2", row_label: "", fabric_code: "",
+  quantity: "", unit: "กก", unit_cost: "", cost_unit: "กก", supplier_id: "",
 });
 
 export default function FabricStockPage() {
@@ -303,8 +304,10 @@ export default function FabricStockPage() {
 
       {/* Staged add modal */}
       {showAdd && (
-        <div className="modal-overlay" onClick={() => setShowAdd(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        /* No close-on-overlay-click: this form holds typed-in data, and an accidental
+           click outside used to discard it. Close via ✕ or ยกเลิก only. */
+        <div className="modal-overlay">
+          <div className="modal">
             <div className="modal-header">
               <div style={{ fontWeight: 500 }}>เพิ่มผ้า (รอการอนุมัติ)</div>
               <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setShowAdd(false)}>✕</button>
@@ -343,7 +346,7 @@ export default function FabricStockPage() {
               </div>
               <div className="form-row form-grid form-grid-3">
                 <div><label className="form-label">เลขที่</label><input value={addForm.fabric_code} onChange={(e) => af("fabric_code", e.target.value)} placeholder="เช่น 147" /></div>
-                <div><label className="form-label">น้ำหนัก</label><input type="number" step="any" value={addForm.weight} onChange={(e) => af("weight", e.target.value)} /></div>
+                <div><label className="form-label">น้ำหนัก</label><input type="number" step="any" value={addForm.weight} onChange={(e) => af("weight", e.target.value)} placeholder="0" /></div>
                 <div>
                   <label className="form-label">หน่วยน้ำหนัก</label>
                   <select value={addForm.weight_unit} onChange={(e) => af("weight_unit", e.target.value)}>
@@ -358,10 +361,10 @@ export default function FabricStockPage() {
                     {STOCK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
-                <div><label className="form-label">สต็อคเริ่มต้น</label><input type="number" step="any" value={addForm.quantity} onChange={(e) => af("quantity", e.target.value)} /></div>
+                <div><label className="form-label">สต็อคเริ่มต้น</label><input type="number" step="any" value={addForm.quantity} onChange={(e) => af("quantity", e.target.value)} placeholder="0" /></div>
               </div>
               <div className="form-row form-grid form-grid-2">
-                <div><label className="form-label">ราคาซื้อ (฿)</label><input type="number" step="0.01" value={addForm.unit_cost} onChange={(e) => af("unit_cost", e.target.value)} /></div>
+                <div><label className="form-label">ราคาซื้อ (฿)</label><input type="number" step="0.01" value={addForm.unit_cost} onChange={(e) => af("unit_cost", e.target.value)} placeholder="0.00" /></div>
                 <div>
                   <label className="form-label">ราคาต่อหน่วย</label>
                   <select value={addForm.cost_unit} onChange={(e) => af("cost_unit", e.target.value)}>

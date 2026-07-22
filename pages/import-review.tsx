@@ -407,8 +407,10 @@ export default function ImportReviewPage() {
 
       {/* Manual edit of a staged row (fix data before it is written to the DB) */}
       {editRow && (
-        <div className="modal-overlay" onClick={() => setEditRow(null)}>
-          <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        /* No close-on-overlay-click: this form holds typed-in data, and an accidental
+           click outside used to discard it. Close via ✕ or ยกเลิก only. */
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 560 }}>
             <div className="modal-header">
               <div style={{ fontWeight: 500 }}>แก้ไขรายการนำเข้า</div>
               <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setEditRow(null)}>✕</button>

@@ -255,8 +255,10 @@ export default function SuppliersPage() {
 
       {/* Add / Edit Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        /* No close-on-overlay-click: this form holds typed-in data, and an accidental
+           click outside used to discard it. Close via ✕ or ยกเลิก only. */
+        <div className="modal-overlay">
+          <div className="modal">
             <div className="modal-header">
               <div style={{ fontWeight:500 }}>{editId ? "แก้ไขซัพพลายเออร์" : "เพิ่มซัพพลายเออร์ใหม่"}</div>
               <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setShowModal(false)}>✕</button>

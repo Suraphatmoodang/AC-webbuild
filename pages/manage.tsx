@@ -5,15 +5,20 @@ import { usePagination, PaginationBar } from "@/lib/pagination";
 import { useRequireRole } from "@/lib/auth";
 import { SearchInput } from "@/lib/search";
 import { compareAccessory } from "@/lib/sort";
+import { numOr, numInput, DEFAULT_MIN_QTY, type NumField } from "@/lib/form-num";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
-type FormData = Omit<Accessory, "id" | "created_at" | "updated_at">;
+type FormData = Omit<Accessory, "id" | "created_at" | "updated_at" | "quantity" | "unit_cost" | "min_quantity"> & {
+  quantity: NumField;
+  unit_cost: NumField;
+  min_quantity: NumField;
+};
 
 const emptyForm = (): FormData => ({
   type: "", acc_code: "", description: "", row: null,
-  color: "", size: "", quantity: 0, unit: "เส้น",
-  unit_cost: 0, min_quantity: 10, supplier_id: null, valuation_method: "fifo", is_active: true,
+  color: "", size: "", quantity: "", unit: "เส้น",
+  unit_cost: "", min_quantity: "", supplier_id: null, valuation_method: "fifo", is_active: true,
 });
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
@@ -22,7 +27,7 @@ function validate(form: FormData): FormErrors {
   const errors: FormErrors = {};
   if (!form.type.trim())  errors.type     = "กรุณาระบุประเภทอุปกรณ์";
   if (!form.unit.trim())  errors.unit     = "กรุณาระบุหน่วย";
-  if (form.quantity < 0)  errors.quantity = "จำนวนต้องไม่ติดลบ";
+  if (form.quantity !== "" && form.quantity < 0) errors.quantity = "จำนวนต้องไม่ติดลบ";
   return errors;
 }
 
@@ -304,27 +309,35 @@ export default function ManagePage() {
     const errors = validate(form);
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setSaving(true);
+    // Blank numeric fields mean "not entered" → fall back to 0 (and the default
+    // minimum for สต็อคขั้นต่ำ) before anything reaches the DB.
+    const payload = {
+      ...form,
+      quantity: numOr(form.quantity),
+      unit_cost: numOr(form.unit_cost),
+      min_quantity: numOr(form.min_quantity, DEFAULT_MIN_QTY),
+    };
     try {
       if (editId) {
-        await updateAccessory(editId, form);
+        await updateAccessory(editId, payload);
         // Overwrite stock: if the quantity was changed, rebuild the item's lots
         // as a single opening lot at the entry's price (see overwriteStock).
         if (stockEditEnabled) {
           const curStock = stockFromLots(lotMap.get(editId) ?? []);
-          if (Number(form.quantity) !== curStock) {
-            await overwriteStock(editId, Number(form.quantity), Number(form.unit_cost) || 0);
+          if (payload.quantity !== curStock) {
+            await overwriteStock(editId, payload.quantity, payload.unit_cost);
           }
         }
         showToast("อัพเดตแล้ว ✓", "success");
       } else {
-        const created = await addAccessory(form);
+        const created = await addAccessory(payload);
         // If an initial stock was entered, seed it as an opening lot so it
         // shows up under the lot model (stock is derived from lots).
-        if (Number(form.quantity) > 0) {
+        if (payload.quantity > 0) {
           await createLot({
             accessory_id: created.id,
-            quantity: Number(form.quantity),
-            unit_cost: Number(form.unit_cost) || 0,
+            quantity: payload.quantity,
+            unit_cost: payload.unit_cost,
             source: "MIGRATION",
             note: "ยอดเริ่มต้น",
           });
@@ -440,8 +453,10 @@ export default function ManagePage() {
 
       {/* Add / Edit Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        /* No close-on-overlay-click: this form holds typed-in data, and an accidental
+           click outside used to discard it. Close via ✕ or ยกเลิก only. */
+        <div className="modal-overlay">
+          <div className="modal">
             <div className="modal-header">
               <div style={{ fontWeight:500 }}>{editId ? "แก้ไขรายการ" : "เพิ่มรายการใหม่"}</div>
               <button className="ghost" style={{ padding:"4px 8px" }} onClick={() => setShowModal(false)}>✕</button>
@@ -507,7 +522,8 @@ export default function ManagePage() {
                 <div>
                   <label className="form-label">สต็อคขั้นต่ำ (แจ้งเตือน)</label>
                   <input type="number" value={form.min_quantity}
-                    onChange={(e) => f("min_quantity", parseFloat(e.target.value) || 0)} />
+                    onChange={(e) => f("min_quantity", numInput(e.target.value))}
+                    placeholder={String(DEFAULT_MIN_QTY)} />
                 </div>
               </div>
 
@@ -517,12 +533,14 @@ export default function ManagePage() {
                   <div>
                     <label className="form-label">ราคาซื้อเริ่มต้น (฿)</label>
                     <input type="number" step="0.0001" value={form.unit_cost}
-                      onChange={(e) => f("unit_cost", parseFloat(e.target.value) || 0)} />
+                      onChange={(e) => f("unit_cost", numInput(e.target.value))}
+                      placeholder="0.00" />
                   </div>
                   <div>
                     <label className="form-label">สต็อคเริ่มต้น</label>
                     <input type="number" value={form.quantity}
-                      onChange={(e) => f("quantity", parseFloat(e.target.value) || 0)}
+                      onChange={(e) => f("quantity", numInput(e.target.value))}
+                      placeholder="0"
                       style={formErrors.quantity ? {borderColor:"var(--red)"} : {}} />
                     {formErrors.quantity && <div style={{fontSize:11,color:"var(--red)",marginTop:3}}>{formErrors.quantity}</div>}
                   </div>
@@ -534,8 +552,8 @@ export default function ManagePage() {
                 {stockEditEnabled && (
                   <StockEditor
                     currentStock={stockFromLots(lotMap.get(editId) ?? [])}
-                    quantity={form.quantity}
-                    unitCost={form.unit_cost}
+                    quantity={numOr(form.quantity)}
+                    unitCost={numOr(form.unit_cost)}
                     unit={form.unit}
                     onQuantity={(v) => f("quantity", v)}
                     onUnitCost={(v) => f("unit_cost", v)}
