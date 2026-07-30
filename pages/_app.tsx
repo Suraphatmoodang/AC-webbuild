@@ -104,7 +104,7 @@ export default function App({ Component, pageProps }: AppProps) {
         background: "var(--bg)",
         position: "sticky", top: 0, zIndex: 50,
       }}>
-        <div className="app-hdr" style={{ maxWidth: 1280, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 20, height: 70 }}>
+        <div className="app-hdr" style={{ maxWidth: 1800, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", gap: 20, height: 70 }}>
           <Link href={title.href} style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>{title.code}</span>
             <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>{title.word}</span>
@@ -161,7 +161,7 @@ export default function App({ Component, pageProps }: AppProps) {
           )}
         </div>
       </header>
-      <main className="app-main" style={{ flex: 1, maxWidth: 1280, margin: "0 auto", padding: "24px", width: "100%" }}>
+      <main className="app-main" style={{ flex: 1, maxWidth: 1800, margin: "0 auto", padding: "24px", width: "100%" }}>
         <Component {...pageProps} />
       </main>
     </div>

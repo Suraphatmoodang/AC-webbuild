@@ -425,7 +425,7 @@ export default function ManagePage() {
                     <td><span className="tag">{item.type}</span></td>
                     <td style={{ color:"var(--text2)" }}>{item.customer || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีรหัส</span>}</td>
-                    <td style={{ maxWidth:160 }}>{item.description || "—"}</td>
+                    <td>{item.description || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.size  || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row ?? "—"}</td>

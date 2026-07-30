@@ -107,13 +107,20 @@ button.ghost:hover { background: var(--bg3); color: var(--text); }
   color: #df2929;
 }
 
-.tag { display: inline-block; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); font-size: 15px; padding: 1px 6px; border-radius: 2px; }
+.tag { display: inline-block; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); font-size: 14px; padding: 2px 7px; border-radius: 2px; white-space: nowrap; }
 
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 14px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+th { text-align: left; font-size: 13px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 11px; border-bottom: 1px solid var(--border); }
 /* Frozen header for scrollable tables: put on <thead>, wrap the table in a fixed-height overflow container. */
 thead.sticky-head th { position: sticky; top: 0; z-index: 10; background: var(--bg2); }
-td { padding: 10px 15px; border-bottom: 1px solid var(--border); font-size: 15px; vertical-align: middle; }
+td { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+
+/* Browse tables (Stock / Manage / History — the ones with a sticky-head) keep every
+   cell on ONE LINE and let the table fill / overflow-scroll rather than wrapping text
+   into tall stacks. The fixed-layout import/updater tables (no sticky-head) are left
+   alone — they set explicit column widths and wrap on purpose. */
+table:has(thead.sticky-head) th,
+table:has(thead.sticky-head) td { white-space: nowrap; }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--bg3); }
 .num { text-align: right; font-family: var(--mono); }
@@ -199,4 +206,5 @@ tr:hover td { background: var(--bg3); }
   .app-nav a > span:last-child { display: none; }
   th { font-size: 12px; }
   td { font-size: 13px; }
+  .tag { font-size: 13px; }
 }

@@ -432,10 +432,10 @@ export default function FabricManagePage() {
                     <td style={{ textAlign:"center" }}>
                       <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleRow(item.id)} style={{ width:"auto", cursor:"pointer" }} />
                     </td>
-                    <td style={{ maxWidth:200 }}><span className="tag">{item.fabric_type}</span></td>
+                    <td><span className="tag">{item.fabric_type}</span></td>
                     <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.fabric_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีเลขที่</span>}</td>
-                    <td style={{ maxWidth:140, color:"var(--text2)" }}>{item.composition || "—"}</td>
-                    <td style={{ maxWidth:140, color:"var(--text2)" }}>{item.construction || "—"}</td>
+                    <td style={{ color:"var(--text2)" }}>{item.composition || "—"}</td>
+                    <td style={{ color:"var(--text2)" }}>{item.construction || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text2)" }}>{item.width || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row_label || "—"}</td>
