@@ -7,6 +7,7 @@ import { buildFabricMatchIndex, fabricMatchKeyForRow, applyFabricUpdates, getSup
 import { parseFabricSheet, type FabricSheetRow } from "@/lib/fabric-sheet";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { OwnerTag } from "@/lib/owner-tag";
 
 // Columns the user can choose to update (the "mode"). `sheetKey` is the parsed-row
 // field that must be present in the file for the column to be selectable.
@@ -21,6 +22,7 @@ const UPDATE_COLUMNS: { field: FabricUpdatableField; label: string; sheetKey: st
   { field: "weight",       label: "น้ำหนัก",       sheetKey: "weight" },
   { field: "width",        label: "หน้าผ้า",       sheetKey: "width" },
   { field: "row_label",    label: "แถว",           sheetKey: "row_label" },
+  { field: "owner",        label: "เจ้าของ",        sheetKey: "owner" },
   { field: "supplier",     label: "ซัพพลายเออร์",  sheetKey: "supplier_name" },
 ];
 
@@ -109,6 +111,7 @@ export default function FabricStockUpdatePage() {
       case "construction": return !sameStr(a.construction, r.construction);
       case "width":        return !sameStr(a.width, r.width);
       case "row_label":    return !sameStr(a.row_label, r.row_label);
+      case "owner":        return !sameStr(a.owner, r.owner);
       case "supplier": {
         const sid = supplierIdFor(r.supplier_name);
         if (sid == null) return false; // no matching supplier → current value left untouched
@@ -139,7 +142,7 @@ export default function FabricStockUpdatePage() {
     if (hideUnmatched && r._match !== "one") return false;
     if (!search) return true;
     const q = search.toLowerCase();
-    return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) ||
+    return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) || r.owner.toLowerCase().includes(q) ||
       r.color.toLowerCase().includes(q) || r.fabric_code.toLowerCase().includes(q);
   });
 
@@ -186,6 +189,7 @@ export default function FabricStockUpdatePage() {
         weight: r.weight,
         width: r.width,
         row_label: r.row_label,
+        owner: r.owner,
         // Only carry a supplier_id when the sheet name actually matches an existing
         // supplier. No match → undefined so the store LEAVES the item's current
         // supplier untouched (never silently clears it).
@@ -311,19 +315,19 @@ export default function FabricStockUpdatePage() {
       {rows.length > 0 && (
         <div className="card" style={{ overflow: "hidden" }}>
           <div style={{ height: "58vh", overflowY: "auto", overflowX: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 1100 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 1180 }}>
               <colgroup>
-                <col style={{ width: "44px" }} /><col style={{ width: "20%" }} /><col style={{ width: "6%" }} />
-                <col style={{ width: "14%" }} /><col style={{ width: "9%" }} /><col style={{ width: "7%" }} />
-                <col style={{ width: "8%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
-                <col style={{ width: "6%" }} /><col style={{ width: "11%" }} />
+                <col style={{ width: "44px" }} /><col style={{ width: "18%" }} /><col style={{ width: "6%" }} />
+                <col style={{ width: "13%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} />
+                <col style={{ width: "7%" }} /><col style={{ width: "6%" }} /><col style={{ width: "7%" }} />
+                <col style={{ width: "6%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                 <tr>
                   <th style={{ textAlign: "center", background: "var(--bg2)" }}>
                     <input type="checkbox" checked={allSel} onChange={toggleAll} style={{ width: "auto", cursor: "pointer" }} />
                   </th>
-                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ชนิดผ้า</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>เลขที่</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>โครงสร้าง</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน้าผ้า</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
+                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ชนิดผ้า</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>เลขที่</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>โครงสร้าง</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน้าผ้า</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>เจ้าของ</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
                 </tr>
               </thead>
               <tbody>
@@ -345,6 +349,7 @@ export default function FabricStockUpdatePage() {
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.min_quantity.toLocaleString()}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.unit_cost ? `฿${r.unit_cost.toFixed(2)}` : "—"}</td>
                       <td style={{ fontSize: 14, color: "var(--text2)" }}>{r.unit || "—"}</td>
+                      <td><OwnerTag owner={r.owner} /></td>
                       <td>
                         {r._match === "one"
                           ? (noop ? <span style={{ fontSize: 14, color: "var(--text3)" }}>ค่าตรงกันแล้ว</span>

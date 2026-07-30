@@ -29,6 +29,7 @@ export type FabricSheetRow = {
   unit: string;
   unit_cost: number;
   cost_unit: string;
+  owner: string;
   supplier_name: string;
   contact_person: string;
   contact_number: string;
@@ -64,6 +65,7 @@ const FIELDS: Record<string, FieldSpec> = {
   unit_cost:      { labels: ["ราคาต่อหน่วย", "ราคาซื้อ"] },
   cost_unit:      { labels: ["หน่วย"], unitOf: "unit_cost" },
   min_quantity:   { labels: ["ขั้นต่ำ"] },
+  owner:          { labels: ["เจ้าของ", "เจ้าของสต็อก", "โรงงานเจ้าของ", "โรงงาน"] },
   supplier_name:  { labels: ["ชื่อบริษัทซัพ", "ชื่อบริษัทซัพพลายเออร์", "ซัพพลายเออร์"] },
   contact_person: { labels: ["ผู้ติดต่อ"] },
   contact_number: { labels: ["เบอร์ติดต่อ"] },
@@ -159,6 +161,7 @@ export function parseFabricSheet(raw: any[][]): { rows: FabricSheetRow[]; cols: 
       unit: str(g(r, "unit")),
       unit_cost: num(g(r, "unit_cost")),
       cost_unit: str(g(r, "cost_unit")),
+      owner: str(g(r, "owner")),
       supplier_name: str(g(r, "supplier_name")),
       contact_person: str(g(r, "contact_person")),
       contact_number: str(g(r, "contact_number")),

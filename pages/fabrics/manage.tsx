@@ -8,6 +8,8 @@ import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareFabric } from "@/lib/sort";
 import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
+import { OwnerTag } from "@/lib/owner-tag";
+import { OwnerSelect } from "@/lib/owner-select";
 import { numOr, numInput, DEFAULT_MIN_QTY, type NumField } from "@/lib/form-num";
 
 type FormData = Omit<Fabric, "id" | "created_at" | "updated_at" | "quantity" | "unit_cost" | "min_quantity" | "weight"> & {
@@ -21,7 +23,7 @@ const emptyForm = (): FormData => ({
   fabric_type: "", composition: "", construction: "", color: "",
   width: "", weight: "", weight_unit: "gm2", row_label: "", fabric_code: "",
   quantity: "", unit: "กก", unit_cost: "", cost_unit: "กก",
-  min_quantity: "", supplier_id: null, valuation_method: "fifo", is_active: true,
+  min_quantity: "", owner: "", supplier_id: null, valuation_method: "fifo", is_active: true,
 });
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
@@ -227,6 +229,7 @@ export default function FabricManagePage() {
   const types        = Array.from(new Set(items.map((i) => i.fabric_type).filter(Boolean))).sort();
   const compositions = Array.from(new Set(items.map((i) => i.composition).filter(Boolean))).sort();
   const constructions = Array.from(new Set(items.map((i) => i.construction).filter(Boolean))).sort();
+  const owners       = Array.from(new Set(items.map((i) => i.owner).filter(Boolean))).sort();
 
   const filtered = useMemo(() => items.filter((i) => {
     if (!showInactive && !i.is_active) return false;
@@ -242,6 +245,7 @@ export default function FabricManagePage() {
       i.width.toLowerCase().includes(q) ||
       i.fabric_code.toLowerCase().includes(q) ||
       i.row_label.toLowerCase().includes(q) ||
+      i.owner.toLowerCase().includes(q) ||
       supName.includes(q)
     );
   }).sort(compareFabric), [items, suppliers, search, filterType, showInactive]);
@@ -305,7 +309,7 @@ export default function FabricManagePage() {
       color: item.color, width: item.width, weight: item.weight, weight_unit: item.weight_unit,
       row_label: item.row_label, fabric_code: item.fabric_code, quantity: curStock,
       unit: item.unit, unit_cost: item.unit_cost, cost_unit: item.cost_unit, min_quantity: item.min_quantity,
-      supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo",
+      owner: item.owner, supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo",
       is_active: item.is_active ?? true,
     });
     setFormErrors({});
@@ -415,13 +419,13 @@ export default function FabricManagePage() {
                     <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width:"auto", cursor:"pointer" }} />
                   </th>
                   <th>ชนิดผ้า</th><th>เลขที่</th><th>เส้นใย</th><th>โครงสร้าง</th><th>สี</th><th>หน้าผ้า</th><th>แถว</th>
-                  <th>ซัพพลายเออร์</th><th>สต็อค</th><th>หน่วย</th>
+                  <th>เจ้าของ</th><th>ซัพพลายเออร์</th><th>สต็อค</th><th>หน่วย</th>
                   <th>ราคา</th><th>ขั้นต่ำ</th><th>สถานะ</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={15} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={16} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {pg.pageItems.map((item) => (
                   <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45, background: selected.has(item.id) ? "var(--bg4)" : undefined }}>
@@ -435,6 +439,7 @@ export default function FabricManagePage() {
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text2)" }}>{item.width || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row_label || "—"}</td>
+                    <td><OwnerTag owner={item.owner} /></td>
                     <td style={{ fontSize:17, color:"var(--text2)" }}>{suppliers.find((s) => s.id === item.supplier_id)?.supplier_name || "—"}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{stockFromLots(lotMap.get(item.id) ?? []).toLocaleString()}</td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
@@ -490,6 +495,11 @@ export default function FabricManagePage() {
                   <Combobox value={form.construction} onChange={(v) => f("construction", v)} options={constructions}
                     placeholder="เช่น Single Jersey" />
                 </div>
+              </div>
+
+              <div className="form-row">
+                <label className="form-label">เจ้าของ · Owner</label>
+                <OwnerSelect value={form.owner} onChange={(v) => f("owner", v)} options={owners} />
               </div>
 
               <div className="form-row">

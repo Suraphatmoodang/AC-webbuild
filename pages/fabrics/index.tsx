@@ -1,23 +1,25 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { getFabrics, getSuppliers, stageFabric, getFabricLotMap, stockFromLots, valueFromLots,
+import { getFabrics, getSuppliers, stageFabric, getFabricLotMap, stockFromLots, valueFromLots, SELF_OWNER,
   type Fabric, type Supplier, type FabricImportRow, type FabricLot } from "@/lib/fabric-store";
 import { useSession, roleCan } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareFabric } from "@/lib/sort";
 import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
+import { OwnerTag } from "@/lib/owner-tag";
+import { OwnerSelect } from "@/lib/owner-select";
 
 type AddForm = {
   fabric_type: string; composition: string; construction: string; color: string;
   width: string; weight: string; weight_unit: string; row_label: string; fabric_code: string;
-  quantity: string; unit: string; unit_cost: string; cost_unit: string; supplier_id: string;
+  quantity: string; unit: string; unit_cost: string; cost_unit: string; owner: string; supplier_id: string;
 };
 const emptyAdd = (): AddForm => ({
   fabric_type: "", composition: "", construction: "", color: "",
   // numeric fields start blank so the greyed placeholder shows through (see lib/form-num)
   width: "", weight: "", weight_unit: "gm2", row_label: "", fabric_code: "",
-  quantity: "", unit: "กก", unit_cost: "", cost_unit: "กก", supplier_id: "",
+  quantity: "", unit: "กก", unit_cost: "", cost_unit: "กก", owner: "", supplier_id: "",
 });
 
 export default function FabricStockPage() {
@@ -29,6 +31,8 @@ export default function FabricStockPage() {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
   const [showLow, setShowLow] = useState(false);
+  // Ownership filter: "" = all, "ours" = only ours (no owner), "external" = only consignment
+  const [ownFilter, setOwnFilter] = useState<"" | "ours" | "external">("");
   const [viewItem, setViewItem] = useState<Fabric | null>(null);
   // Public page — the session only decides whether the "edit in manage" shortcut
   // shows, and only a fabric-side admin can follow it.
@@ -55,10 +59,15 @@ export default function FabricStockPage() {
   const valueOf = (id: string) => valueFromLots(lotMap.get(id) ?? []);
   const lotsOf = (id: string) => (lotMap.get(id) ?? []).filter((l) => Number(l.quantity_remaining) > 0);
   const types = Array.from(new Set(items.map((i) => i.fabric_type))).sort();
+  const owners = Array.from(new Set(items.map((i) => i.owner).filter(Boolean))).sort();
+  // "External" = held here but owned by another factory (owner filled). Blank = ours.
+  const isExternal = (i: Fabric) => i.owner.trim() !== "";
 
   const filtered = useMemo(() => items.filter((i) => {
     if (showLow && stockOf(i.id) > i.min_quantity) return false;
     if (filterType && i.fabric_type !== filterType) return false;
+    if (ownFilter === "ours" && isExternal(i)) return false;
+    if (ownFilter === "external" && !isExternal(i)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -68,13 +77,19 @@ export default function FabricStockPage() {
       i.color.toLowerCase().includes(q) ||
       i.width.toLowerCase().includes(q) ||
       i.fabric_code.toLowerCase().includes(q) ||
-      i.row_label.toLowerCase().includes(q)
+      i.row_label.toLowerCase().includes(q) ||
+      i.owner.toLowerCase().includes(q)
     );
-  }).sort(compareFabric), [items, lotMap, search, filterType, showLow]);
+  }).sort(compareFabric), [items, lotMap, search, filterType, showLow, ownFilter]);
 
   const totalValue = items.reduce((s, i) => s + valueOf(i.id), 0);
+  // Value split: everything counts in the headline total (the owner co-owns the
+  // factory), but external (consignment) value is also broken out on its own.
+  const externalValue = items.filter(isExternal).reduce((s, i) => s + valueOf(i.id), 0);
+  const oursValue = totalValue - externalValue;
+  const externalCount = items.filter(isExternal).length;
   const lowCount = items.filter((i) => stockOf(i.id) <= Number(i.min_quantity)).length;
-  const pg = usePagination(filtered, `${search}|${filterType}|${showLow}`);
+  const pg = usePagination(filtered, `${search}|${filterType}|${showLow}|${ownFilter}`);
 
   const af = (field: keyof AddForm, val: string) => { setAddForm((p) => ({ ...p, [field]: val })); setAddErr(""); };
 
@@ -92,6 +107,7 @@ export default function FabricStockPage() {
         fabric_code: addForm.fabric_code.trim(),
         quantity: parseFloat(addForm.quantity) || 0, min_quantity: 10, unit: addForm.unit.trim(),
         unit_cost: parseFloat(addForm.unit_cost) || 0, cost_unit: addForm.cost_unit.trim(),
+        owner: addForm.owner.trim(),
         supplier_name: sup?.supplier_name ?? "", contact_person: sup?.contact_person ?? "",
         contact_number: sup?.contact_number ?? "", contact_email: sup?.contact_email ?? "",
         address: sup?.address ?? "", city: sup?.city ?? "", country: sup?.country ?? "",
@@ -125,8 +141,25 @@ export default function FabricStockPage() {
         ))}
       </div>
 
+      {/* Ownership value split — everything is in the headline total above; this shows
+          how much of it is ours vs. held for another factory (consignment). */}
+      {externalCount > 0 && (
+        <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 24, padding: "12px 16px", marginBottom: 16, fontSize: 14 }}>
+          <div>
+            <span style={{ color: "var(--text3)" }}>มูลค่า {SELF_OWNER} · Ours </span>
+            <span style={{ fontFamily: "var(--mono)", color: "var(--green)" }}>฿{oursValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, background: "#7c3aed", flexShrink: 0 }} />
+            <span style={{ color: "var(--text3)" }}>มูลค่าฝากเก็บ (โรงงานอื่น) · External </span>
+            <span style={{ fontFamily: "var(--mono)", color: "#7c3aed", fontWeight: 500 }}>฿{externalValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span style={{ color: "var(--text3)" }}> · {externalCount} รายการ</span>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาชนิดผ้า เส้นใย สี หน้าผ้า เลขที่…" leftIcon="🔍" style={{ flex: "1 1 240px" }} />
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาชนิดผ้า เส้นใย สี หน้าผ้า เลขที่ เจ้าของ…" leftIcon="🔍" style={{ flex: "1 1 240px" }} />
         <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width: "auto", minWidth: 160, maxWidth: 260 }}>
           <option value="">ทุกชนิดผ้า</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -135,6 +168,13 @@ export default function FabricStockPage() {
           style={{ whiteSpace: "nowrap", ...(showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}) }}>
           ⚠ สต็อคต่ำ
         </button>
+        {(owners.length > 0 || ownFilter !== "") && (
+          <select value={ownFilter} onChange={(e) => setOwnFilter(e.target.value as "" | "ours" | "external")} style={{ width: "auto", minWidth: 150 }}>
+            <option value="">ทุกเจ้าของ</option>
+            <option value="ours">{`เฉพาะ ${SELF_OWNER}`}</option>
+            <option value="external">เฉพาะฝากเก็บ (โรงงานอื่น)</option>
+          </select>
+        )}
         <button className="primary" onClick={() => { setAddForm(emptyAdd()); setAddErr(""); setShowAdd(true); }}>+ เพิ่มผ้า</button>
         <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)", minWidth: 90, whiteSpace: "nowrap" }}>{filtered.length} รายการ</span>
       </div>
@@ -148,12 +188,12 @@ export default function FabricStockPage() {
               <thead className="sticky-head">
                 <tr>
                   <th>ชนิดผ้า</th><th>เลขที่</th><th>โครงสร้าง</th><th>สี</th><th>หน้าผ้า</th><th>น้ำหนัก</th><th>แถว</th>
-                  <th>สต็อค</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>สถานะ</th>
+                  <th>เจ้าของ</th><th>สต็อค</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>สถานะ</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={12} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={13} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {pg.pageItems.map((item) => {
                   const stock = stockOf(item.id);
@@ -171,6 +211,7 @@ export default function FabricStockPage() {
                         {Number(item.weight) ? `${Number(item.weight).toLocaleString()} ${item.weight_unit}` : "—"}
                       </td>
                       <td style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>{item.row_label || "—"}</td>
+                      <td><OwnerTag owner={item.owner} /></td>
                       <td className="num" style={{ color: isLow ? "var(--accent)" : "var(--text)", fontWeight: isLow ? 500 : 400 }}>
                         {stock.toLocaleString()}
                       </td>
@@ -222,6 +263,7 @@ export default function FabricStockPage() {
                   ["หน้าผ้า", viewItem.width],
                   ["น้ำหนัก", Number(viewItem.weight) ? `${Number(viewItem.weight).toLocaleString()} ${viewItem.weight_unit}` : ""],
                   ["แถว", viewItem.row_label],
+                  ["เจ้าของ", viewItem.owner ? `${viewItem.owner} (ฝากเก็บ)` : SELF_OWNER],
                   ["สต็อคคงเหลือ", `${vStock.toLocaleString()} ${viewItem.unit}`],
                   ["สต็อคขั้นต่ำ", `${Number(viewItem.min_quantity).toLocaleString()} ${viewItem.unit}`],
                   ["ราคาซื้อเฉลี่ย", `฿${vAvg.toLocaleString("th-TH", { minimumFractionDigits: 2 })}${viewItem.cost_unit ? ` / ${viewItem.cost_unit}` : ""}`],
@@ -331,6 +373,10 @@ export default function FabricStockPage() {
                   <label className="form-label">โครงสร้าง (Construction)</label>
                   <input value={addForm.construction} onChange={(e) => af("construction", e.target.value)} placeholder="เช่น Single Jersey" />
                 </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">เจ้าของ</label>
+                <OwnerSelect value={addForm.owner} onChange={(v) => af("owner", v)} options={owners} />
               </div>
               <div className="form-row">
                 <label className="form-label">ซัพพลายเออร์</label>

@@ -9,7 +9,7 @@ import { usePagination, PaginationBar } from "@/lib/pagination";
 // is robust to columns being reordered. Each field lists the accepted header
 // text(s); the first header that matches (after whitespace-normalizing) wins.
 type ParsedRow = {
-  type: string; acc_code: string; description: string; row: number | null;
+  type: string; customer: string; acc_code: string; description: string; row: number | null;
   color: string; size: string; quantity: number; min_quantity: number; unit: string; unit_cost: number;
   supplier_name: string; contact_person: string; contact_number: string;
   contact_email: string; address: string; city: string; country: string;
@@ -19,6 +19,7 @@ type ParsedRow = {
 // field → list of accepted header labels (normalized on both sides when matching)
 const HEADER_MAP: Record<string, string[]> = {
   type:           ["ชนิดอุปกรณ์"],
+  customer:       ["ลูกค้า"],
   acc_code:       ["รหัสสินค้า"],
   description:    ["รายละเอียด"],
   row:            ["แถว (เฉพาะด้าย)", "แถว"],
@@ -103,7 +104,7 @@ export default function ImportPage() {
       const parsed: ParsedRow[] = raw.slice(1)
         .filter((r) => str(g(r, "type")) || str(g(r, "description"))) // need type or description
         .map((r) => ({
-          type: str(g(r, "type")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
+          type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
           row: str(g(r, "row")) ? parseInt(str(g(r, "row"))) || null : null,
           color: str(g(r, "color")), size: str(g(r, "size")),
           quantity: num(g(r, "quantity")), min_quantity: num(g(r, "min_quantity")),
@@ -180,21 +181,22 @@ export default function ImportPage() {
             ตัวอย่างก่อนนำเข้า · {rows.length} รายการ
           </div>
           <div style={{ overflowX: "auto", maxHeight: "60vh", overflowY: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 900 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 980 }}>
               <colgroup>
-                <col style={{ width: "16%" }} /><col style={{ width: "10%" }} /><col style={{ width: "20%" }} />
-                <col style={{ width: "10%" }} /><col style={{ width: "10%" }} /><col style={{ width: "10%" }} />
-                <col style={{ width: "24%" }} />
+                <col style={{ width: "15%" }} /><col style={{ width: "10%" }} /><col style={{ width: "9%" }} /><col style={{ width: "19%" }} />
+                <col style={{ width: "10%" }} /><col style={{ width: "8%" }} /><col style={{ width: "9%" }} />
+                <col style={{ width: "20%" }} />
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{ whiteSpace: "nowrap" }}>ประเภท</th><th style={{ whiteSpace: "nowrap" }}>รหัส</th><th style={{ whiteSpace: "nowrap" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap" }}>สี/ขนาด</th><th style={{ whiteSpace: "nowrap" }}>หน่วย</th><th className="num" style={{ whiteSpace: "nowrap" }}>ราคา</th><th style={{ whiteSpace: "nowrap" }}>ซัพพลายเออร์</th>
+                  <th style={{ whiteSpace: "nowrap" }}>ประเภท</th><th style={{ whiteSpace: "nowrap" }}>ลูกค้า</th><th style={{ whiteSpace: "nowrap" }}>รหัส</th><th style={{ whiteSpace: "nowrap" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap" }}>สี/ขนาด</th><th style={{ whiteSpace: "nowrap" }}>หน่วย</th><th className="num" style={{ whiteSpace: "nowrap" }}>ราคา</th><th style={{ whiteSpace: "nowrap" }}>ซัพพลายเออร์</th>
                 </tr>
               </thead>
               <tbody>
                 {pg.pageItems.map((r, i) => (
                   <tr key={i}>
                     <td style={{ fontWeight: 500, wordBreak: "break-word" }}>{r.type}</td>
+                    <td style={{ fontSize: 14, color: "var(--text2)", wordBreak: "break-word" }}>{r.customer || "—"}</td>
                     <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.acc_code || "—"}</td>
                     <td style={{ wordBreak: "break-word" }}>{r.description || "—"}</td>
                     <td style={{ fontSize: 14, color: "var(--text2)" }}>{[r.color, r.size].filter(Boolean).join(" / ") || "—"}</td>

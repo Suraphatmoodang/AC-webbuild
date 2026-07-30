@@ -10,7 +10,9 @@ import { useSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
 // This page is the only place they meet, so it also shows a live count/value of
 // each so you can see at a glance which side you're heading into.
 
-type Stat = { items: number; value: number } | null;
+// `external` = value of stock owned by ANOTHER company (fabric consignment; owner set).
+// Undefined on the accessory side, which has no ownership concept.
+type Stat = { items: number; value: number; external?: number } | null;
 
 const SECTIONS: { href: string; section: Section; title: string; en: string; blurb: string }[] = [
   {
@@ -54,6 +56,8 @@ export default function HomePage() {
       .then(([items, lm]) => setFab({
         items: items.length,
         value: items.reduce((s, f) => s + fabValue(lm.get(f.id) ?? []), 0),
+        external: items.filter((f) => f.owner.trim() !== "")
+          .reduce((s, f) => s + fabValue(lm.get(f.id) ?? []), 0),
       }))
       .catch(() => setFab({ items: 0, value: 0 }));
   }, []);
@@ -104,17 +108,30 @@ export default function HomePage() {
               </div>
               <div style={{ fontSize: 15, color: "var(--text3)", letterSpacing: "0.04em", marginBottom: 10 }}>{s.en}</div>
               <div style={{ fontSize: 14, color: "var(--text2)", minHeight: 42 }}>{s.blurb}</div>
-              <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12, display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+              <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12, fontSize: 14 }}>
                 {st === null ? (
                   <span style={{ color: "var(--text3)" }}>กำลังโหลด…</span>
                 ) : (
                   <>
-                    <span style={{ color: "var(--text3)" }}>
-                      <span style={{ fontFamily: "var(--mono)", color: "var(--text)" }}>{st.items.toLocaleString()}</span> รายการ
-                    </span>
-                    <span style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>
-                      ฿{st.value.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
-                    </span>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "var(--text3)" }}>
+                        <span style={{ fontFamily: "var(--mono)", color: "var(--text)" }}>{st.items.toLocaleString()}</span> รายการ
+                      </span>
+                      <span style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>
+                        ฿{st.value.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                    {st.external ? (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 7, fontSize: 12 }}>
+                        <span style={{ color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
+                          <span style={{ width: 7, height: 7, borderRadius: 999, background: "#7c3aed", flexShrink: 0 }} />
+                          ของโรงงานอื่น (ฝากเก็บ)
+                        </span>
+                        <span style={{ fontFamily: "var(--mono)", color: "#7c3aed" }}>
+                          ฿{st.external.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>

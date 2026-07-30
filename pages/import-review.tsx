@@ -61,7 +61,8 @@ export default function ImportReviewPage() {
     if (!search) return true;
     const q = search.toLowerCase();
     return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
-      r.acc_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q);
+      r.acc_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q) ||
+      r.customer.toLowerCase().includes(q);
   });
 
   const pg = usePagination(filtered, `${search}|${pageSize}`, pageSize);
@@ -144,7 +145,7 @@ export default function ImportReviewPage() {
     // matches (whitespace-insensitive), so the dropdown shows it selected.
     const matchedSup = suppliers.find((s) => normName(s.supplier_name) === normName(r.supplier_name));
     setEditForm({
-      type: r.type, acc_code: r.acc_code, description: r.description,
+      type: r.type, customer: r.customer, acc_code: r.acc_code, description: r.description,
       row: r.row, color: r.color, size: r.size,
       quantity: r.quantity, min_quantity: r.min_quantity,
       unit: r.unit, unit_cost: r.unit_cost,
@@ -162,7 +163,7 @@ export default function ImportReviewPage() {
     setSaving(true);
     try {
       const patch = {
-        type: String(editForm.type).trim(), acc_code: String(editForm.acc_code).trim(),
+        type: String(editForm.type).trim(), customer: String(editForm.customer).trim(), acc_code: String(editForm.acc_code).trim(),
         description: String(editForm.description).trim(),
         row: editForm.row === "" || editForm.row === null ? null : parseInt(String(editForm.row)) || null,
         color: String(editForm.color).trim(), size: String(editForm.size).trim(),
@@ -221,11 +222,11 @@ export default function ImportReviewPage() {
           <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}>ไม่มีรายการรอตรวจสอบ</div>
         ) : (
           <div style={{ height: "62vh", overflowY: "auto", overflowX: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 1180 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 1280 }}>
               <colgroup>
-                <col style={{ width: "44px" }} /><col style={{ width: "12%" }} /><col style={{ width: "8%" }} />
-                <col style={{ width: "15%" }} /><col style={{ width: "9%" }} /><col style={{ width: "6%" }} />
-                <col style={{ width: "6%" }} /><col style={{ width: "14%" }} /><col style={{ width: "9%" }} />
+                <col style={{ width: "44px" }} /><col style={{ width: "11%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} />
+                <col style={{ width: "14%" }} /><col style={{ width: "9%" }} /><col style={{ width: "6%" }} />
+                <col style={{ width: "6%" }} /><col style={{ width: "13%" }} /><col style={{ width: "9%" }} />
                 <col style={{ width: "170px" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
@@ -233,7 +234,7 @@ export default function ImportReviewPage() {
                   <th style={{ textAlign: "center", background: "var(--bg2)" }}>
                     <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width: "auto", cursor: "pointer" }} title="เลือกทั้งหมด (ข้ามรายการซ้ำ)" />
                   </th>
-                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี/ขนาด</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ซัพพลายเออร์</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะ</th><th style={{ background: "var(--bg2)" }}>จัดการ</th>
+                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ลูกค้า</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี/ขนาด</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ซัพพลายเออร์</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะ</th><th style={{ background: "var(--bg2)" }}>จัดการ</th>
                 </tr>
               </thead>
               <tbody>
@@ -255,6 +256,7 @@ export default function ImportReviewPage() {
                       <td style={{ fontWeight: 500, wordBreak: "break-word", cursor: "pointer" }} onClick={() => setDetailRow(r)}>
                         {r.type || <span style={{ color: "var(--red)" }}>ไม่มีประเภท</span>}
                       </td>
+                      <td style={{ fontSize: 14, color: "var(--text2)", wordBreak: "break-word" }}>{r.customer || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.acc_code || "—"}</td>
                       <td style={{ wordBreak: "break-word", cursor: "pointer" }} onClick={() => setDetailRow(r)}>{r.description || "—"}</td>
                       <td style={{ fontSize: 14, color: "var(--text2)" }}>{[r.color, r.size].filter(Boolean).join(" / ") || "—"}</td>
@@ -316,6 +318,7 @@ export default function ImportReviewPage() {
             </div>
             <div className="modal-body">
               {[
+                ["ลูกค้า", detailRow.customer],
                 ["รหัสสินค้า", detailRow.acc_code],
                 ["รายละเอียด", detailRow.description],
                 ["สี", detailRow.color], ["ขนาด", detailRow.size],
@@ -357,6 +360,7 @@ export default function ImportReviewPage() {
         const matches = matchesFor(compareRow);
         const fields: [string, (a: Accessory) => string, string][] = [
           ["ประเภท", (a) => a.type, compareRow.type],
+          ["ลูกค้า", (a) => a.customer, compareRow.customer],
           ["รหัสสินค้า", (a) => a.acc_code, compareRow.acc_code],
           ["รายละเอียด", (a) => a.description, compareRow.description],
           ["สี", (a) => a.color, compareRow.color],
@@ -425,6 +429,10 @@ export default function ImportReviewPage() {
                   <label className="form-label">รหัสสินค้า</label>
                   <input value={editForm.acc_code} onChange={(e) => ef("acc_code", e.target.value)} />
                 </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">ลูกค้า</label>
+                <input value={editForm.customer} onChange={(e) => ef("customer", e.target.value)} placeholder="เช่น ดามาร์ท" />
               </div>
               <div className="form-row">
                 <label className="form-label">รายละเอียด</label>

@@ -9,7 +9,7 @@ import { SearchInput } from "@/lib/search";
 
 // Header-name → field mapping (same sheet layout as the importer)
 const HEADER_MAP: Record<string, string[]> = {
-  type: ["ชนิดอุปกรณ์"], acc_code: ["รหัสสินค้า"], description: ["รายละเอียด"],
+  type: ["ชนิดอุปกรณ์"], customer: ["ลูกค้า"], acc_code: ["รหัสสินค้า"], description: ["รายละเอียด"],
   color: ["สี"], size: ["ขนาด"], quantity: ["สต็อคคงเหลือ", "สต็อค"],
   unit: ["หน่วย"], unit_cost: ["ราคาซื้อ"], min_quantity: ["ขั้นต่ำ"],
   supplier_name: ["ชื่อบริษัทซัพ", "ชื่อบริษัทซัพพลายเออร์", "ซัพพลายเออร์"],
@@ -25,12 +25,13 @@ const UPDATE_COLUMNS: { field: UpdatableField; label: string; sheetKey: string }
   { field: "unit_cost",    label: "ราคาซื้อ",      sheetKey: "unit_cost" },
   { field: "unit",         label: "หน่วย",         sheetKey: "unit" },
   { field: "acc_code",     label: "รหัสสินค้า",     sheetKey: "acc_code" },
+  { field: "customer",     label: "ลูกค้า",         sheetKey: "customer" },
   { field: "description",  label: "รายละเอียด",    sheetKey: "description" },
   { field: "supplier",     label: "ซัพพลายเออร์",  sheetKey: "supplier_name" },
 ];
 
 type Row = {
-  type: string; acc_code: string; description: string; color: string; size: string;
+  type: string; customer: string; acc_code: string; description: string; color: string; size: string;
   quantity: number; unit_cost: number; min_quantity: number; unit: string; supplier_name: string;
   _match: "one" | "multi" | "none";
   _matchId?: string;
@@ -92,7 +93,7 @@ export default function StockUpdatePage() {
         .filter((r) => str(g(r, "type")) || str(g(r, "description")))
         .map((r) => {
           const base = {
-            type: str(g(r, "type")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
+            type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
             color: str(g(r, "color")), size: str(g(r, "size")),
             quantity: num(g(r, "quantity")), unit_cost: num(g(r, "unit_cost")),
             min_quantity: num(g(r, "min_quantity")), unit: str(g(r, "unit")), supplier_name: str(g(r, "supplier_name")),
@@ -142,6 +143,7 @@ export default function StockUpdatePage() {
       case "unit_cost":    return Number(a.unit_cost) !== r.unit_cost;
       case "unit":         return !sameStr(a.unit, r.unit);
       case "acc_code":     return !sameStr(a.acc_code, r.acc_code);
+      case "customer":     return !sameStr(a.customer, r.customer);
       case "description":  return !sameStr(a.description, r.description);
       case "supplier": {
         const sid = supplierIdFor(r.supplier_name);
@@ -163,7 +165,7 @@ export default function StockUpdatePage() {
     if (!search) return true;
     const q = search.toLowerCase();
     return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
-      r.acc_code.toLowerCase().includes(q);
+      r.acc_code.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
   });
 
   const pg = usePagination(visible, `${search}|${hideUnmatched}`, 250);
@@ -210,6 +212,7 @@ export default function StockUpdatePage() {
         description: r.description,
         unit: r.unit,
         acc_code: r.acc_code,
+        customer: r.customer,
         // Only carry a supplier_id when the sheet name actually matches an
         // existing supplier. No match → undefined so the store LEAVES the
         // item's current supplier untouched (never silently clears it).
@@ -335,10 +338,10 @@ export default function StockUpdatePage() {
       {rows.length > 0 && (
         <div className="card" style={{ overflow: "hidden" }}>
           <div style={{ height: "58vh", overflowY: "auto", overflowX: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 1000 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 1080 }}>
               <colgroup>
-                <col style={{ width: "44px" }} /><col style={{ width: "13%" }} /><col style={{ width: "9%" }} />
-                <col style={{ width: "18%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
+                <col style={{ width: "44px" }} /><col style={{ width: "12%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} />
+                <col style={{ width: "16%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
                 <col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} /><col style={{ width: "11%" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
@@ -346,7 +349,7 @@ export default function StockUpdatePage() {
                   <th style={{ textAlign: "center", background: "var(--bg2)" }}>
                     <input type="checkbox" checked={allSel} onChange={toggleAll} style={{ width: "auto", cursor: "pointer" }} />
                   </th>
-                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
+                  <th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ประเภท</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ลูกค้า</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รหัส</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>รายละเอียด</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สี</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ขั้นต่ำ</th><th className="num" style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>ราคา</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>หน่วย</th><th style={{ whiteSpace: "nowrap", background: "var(--bg2)" }}>สถานะจับคู่</th>
                 </tr>
               </thead>
               <tbody>
@@ -360,6 +363,7 @@ export default function StockUpdatePage() {
                         {canSelect && <input type="checkbox" checked={sel} onChange={() => toggleRow(i)} style={{ width: "auto", cursor: "pointer" }} />}
                       </td>
                       <td style={{ fontWeight: 500, wordBreak: "break-word" }}>{r.type}</td>
+                      <td style={{ fontSize: 14, color: "var(--text2)", wordBreak: "break-word" }}>{r.customer || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text2)" }}>{r.acc_code || "—"}</td>
                       <td style={{ wordBreak: "break-word" }}>{r.description || "—"}</td>
                       <td style={{ fontSize: 14, color: "var(--text2)" }}>{r.color || "—"}</td>

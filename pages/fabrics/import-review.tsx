@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import { getPendingFabricImports, approveFabricImports, rejectFabricImports, getFabricDuplicateMap,
-  getSuppliers, updateFabricImportRow,
+  getSuppliers, updateFabricImportRow, SELF_OWNER,
   type FabricImportRow, type Fabric, type Supplier } from "@/lib/fabric-store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
+import { OwnerSelect } from "@/lib/owner-select";
 
 const PAGE_SIZES = [100, 250, 500];
 
@@ -58,13 +59,20 @@ export default function FabricImportReviewPage() {
   const isMultiDup = (r: FabricImportRow) => dupCount(r) > 1;
   const isValid = (r: FabricImportRow) => r.fabric_type.trim() !== "" && r.unit.trim() !== "";
   const supName = (id: string | null) => suppliers.find((s) => s.id === id)?.supplier_name ?? "—";
+  // Owner choices for the edit dropdown: factory names already on existing fabrics
+  // (via the duplicate map) plus any already present on the staged rows.
+  const owners = Array.from(new Set([
+    ...Array.from(dupMap.values()).flat().map((f) => f.owner),
+    ...rows.map((r) => r.owner),
+  ].filter(Boolean))).sort();
 
   const filtered = rows.filter((r) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) ||
       r.composition.toLowerCase().includes(q) || r.color.toLowerCase().includes(q) ||
-      r.fabric_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q);
+      r.fabric_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q) ||
+      r.owner.toLowerCase().includes(q);
   });
 
   const pg = usePagination(filtered, `${search}|${pageSize}`, pageSize);
@@ -144,7 +152,7 @@ export default function FabricImportReviewPage() {
       color: r.color, width: r.width, weight: r.weight, weight_unit: r.weight_unit,
       row_label: r.row_label, fabric_code: r.fabric_code,
       quantity: r.quantity, min_quantity: r.min_quantity,
-      unit: r.unit, unit_cost: r.unit_cost, cost_unit: r.cost_unit,
+      unit: r.unit, unit_cost: r.unit_cost, cost_unit: r.cost_unit, owner: r.owner,
       supplier_name: matchedSup ? matchedSup.supplier_name : r.supplier_name,
     });
     setEditRow(r);
@@ -166,7 +174,7 @@ export default function FabricImportReviewPage() {
         fabric_code: String(editForm.fabric_code).trim(),
         quantity: Number(editForm.quantity) || 0, min_quantity: Number(editForm.min_quantity) || 0,
         unit: String(editForm.unit).trim(), unit_cost: Number(editForm.unit_cost) || 0,
-        cost_unit: String(editForm.cost_unit).trim(),
+        cost_unit: String(editForm.cost_unit).trim(), owner: String(editForm.owner).trim(),
         supplier_name: String(editForm.supplier_name).trim(),
       };
       const updated = await updateFabricImportRow(editRow.id, patch);
@@ -326,6 +334,7 @@ export default function FabricImportReviewPage() {
                 ["สต็อค", `${Number(detailRow.quantity).toLocaleString()} ${detailRow.unit}`],
                 ["สต็อคขั้นต่ำ", String(detailRow.min_quantity)],
                 ["ราคาต่อหน่วย", `฿${Number(detailRow.unit_cost).toFixed(2)}${detailRow.cost_unit ? ` / ${detailRow.cost_unit}` : ""}`],
+                ["เจ้าของ", detailRow.owner || SELF_OWNER],
                 ["— ซัพพลายเออร์ —", ""],
                 ["ชื่อบริษัท", detailRow.supplier_name],
                 ["ผู้ติดต่อ", detailRow.contact_person],
@@ -371,6 +380,7 @@ export default function FabricImportReviewPage() {
           ["ราคาต่อหน่วย", (f) => `฿${Number(f.unit_cost).toFixed(2)}`, compareRow.unit_cost ? `฿${Number(compareRow.unit_cost).toFixed(2)}` : "—"],
           ["สต็อค", (f) => String(f.quantity), String(compareRow.quantity)],
           ["ขั้นต่ำ", (f) => String(f.min_quantity), String(compareRow.min_quantity)],
+          ["เจ้าของ", (f) => f.owner || SELF_OWNER, compareRow.owner || SELF_OWNER],
           ["ซัพพลายเออร์", (f) => supName(f.supplier_id), compareRow.supplier_name || "—"],
         ];
         return (
@@ -505,6 +515,10 @@ export default function FabricImportReviewPage() {
                     {STOCK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">เจ้าของ</label>
+                <OwnerSelect value={editForm.owner || ""} onChange={(v) => ef("owner", v)} options={owners} />
               </div>
               <div className="form-row">
                 <label className="form-label">ซัพพลายเออร์</label>

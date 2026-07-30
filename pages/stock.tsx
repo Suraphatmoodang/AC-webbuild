@@ -9,12 +9,12 @@ import { compareAccessory } from "@/lib/sort";
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
 type AddForm = {
-  type: string; acc_code: string; description: string; row: string;
+  type: string; customer: string; acc_code: string; description: string; row: string;
   color: string; size: string; quantity: string; unit: string; unit_cost: string;
   supplier_id: string;
 };
 const emptyAdd = (): AddForm => ({
-  type: "", acc_code: "", description: "", row: "", color: "", size: "",
+  type: "", customer: "", acc_code: "", description: "", row: "", color: "", size: "",
   // numeric fields start blank so the greyed placeholder shows through (see lib/form-num)
   quantity: "", unit: "เส้น", unit_cost: "", supplier_id: "",
 });
@@ -55,6 +55,7 @@ export default function StockPage() {
   const valueOf = (id: string) => valueFromLots(lotMap.get(id) ?? []);
   const lotsOf = (id: string) => (lotMap.get(id) ?? []).filter((l) => Number(l.quantity_remaining) > 0);
   const types = Array.from(new Set(items.map((i) => i.type))).sort();
+  const customers = Array.from(new Set(items.map((i) => i.customer).filter(Boolean))).sort();
 
   const filtered = useMemo(() => items.filter((i) => {
     if (showLow && stockOf(i.id) > i.min_quantity) return false;
@@ -63,6 +64,7 @@ export default function StockPage() {
     const q = search.toLowerCase();
     return (
       i.type.toLowerCase().includes(q) ||
+      i.customer.toLowerCase().includes(q) ||
       i.acc_code.toLowerCase().includes(q) ||
       i.description.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
@@ -83,7 +85,7 @@ export default function StockPage() {
     try {
       const sup = suppliers.find((s) => s.id === addForm.supplier_id);
       const payload: Omit<ImportRow, "id" | "batch_id" | "status" | "created_at" | "approved_at"> = {
-        type: addForm.type.trim(), acc_code: addForm.acc_code.trim(), description: addForm.description.trim(),
+        type: addForm.type.trim(), customer: addForm.customer.trim(), acc_code: addForm.acc_code.trim(), description: addForm.description.trim(),
         row: addForm.row ? parseInt(addForm.row) || null : null,
         color: addForm.color.trim(), size: addForm.size.trim(),
         quantity: parseFloat(addForm.quantity) || 0, min_quantity: 10, unit: addForm.unit.trim(),
@@ -143,13 +145,13 @@ export default function StockPage() {
             <table>
               <thead className="sticky-head">
                 <tr>
-                  <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
+                  <th>ประเภท</th><th>ลูกค้า</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
                   <th>สต็อค</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>สถานะ</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={12} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {pg.pageItems.map((item) => {
                   const stock = stockOf(item.id);
@@ -159,6 +161,7 @@ export default function StockPage() {
                   return (
                     <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => setViewItem(item)}>
                       <td><span className="tag">{item.type}</span></td>
+                      <td style={{ color: "var(--text2)" }}>{item.customer || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--text2)" }}>{item.acc_code || "—"}</td>
                       <td>{item.description || "—"}</td>
                       <td style={{ color: "var(--text2)" }}>{item.color || "—"}</td>
@@ -208,6 +211,7 @@ export default function StockPage() {
                 const vAvg = vStock > 0 ? vValue / vStock : 0;
                 const vLots = lotsOf(viewItem.id);
                 const rows: [string, string][] = [
+                  ["ลูกค้า", viewItem.customer],
                   ["รหัสสินค้า", viewItem.acc_code],
                   ["รายละเอียด", viewItem.description],
                   ["สี", viewItem.color],
@@ -317,6 +321,11 @@ export default function StockPage() {
                   <label className="form-label">รหัสสินค้า</label>
                   <input value={addForm.acc_code} onChange={(e) => af("acc_code", e.target.value)} placeholder="เช่น VC-32" />
                 </div>
+              </div>
+              <div className="form-row">
+                <label className="form-label">ลูกค้า</label>
+                <input value={addForm.customer} onChange={(e) => af("customer", e.target.value)} placeholder="เช่น ดามาร์ท" list="idx-customers" />
+                <datalist id="idx-customers">{customers.map((c) => <option key={c} value={c} />)}</datalist>
               </div>
               <div className="form-row">
                 <label className="form-label">รายละเอียด</label>

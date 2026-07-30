@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 export type Accessory = {
   id: string;
   type: string;
+  customer: string;   // ลูกค้า — a label, not part of item identity (see match keys below)
   acc_code: string;
   description: string;
   row: number | null;
@@ -36,6 +37,7 @@ export type ImportRow = {
   batch_id: string;
   status: "pending" | "approved" | "rejected";
   type: string;
+  customer: string;   // ลูกค้า
   acc_code: string;
   description: string;
   row: number | null;
@@ -428,7 +430,7 @@ export async function deleteSupplier(id: string): Promise<void> {
 // with a different stock level is still the same item, so it should be flagged
 // as a duplicate rather than treated as a new entry.
 const IMPORT_MATCH_FIELDS = [
-  "type", "acc_code", "description", "row", "color", "size",
+  "type", "customer", "acc_code", "description", "row", "color", "size",
   "unit", "unit_cost", "supplier_name", "contact_person",
   "contact_number", "contact_email", "address", "city", "country",
   "postal_code", "lead_time", "payment_term", "tax_id",
@@ -601,6 +603,7 @@ export async function approveImports(
 
       const fields = {
         type: r.type,
+        customer: r.customer,
         acc_code: r.acc_code,
         description: r.description,
         row: r.row,
@@ -819,10 +822,13 @@ export async function adjustLot(lotId: string, newRemaining: number): Promise<vo
 
 // ── Stock Updater (bulk update existing accessories by matching) ─────
 
-export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier" | "unit" | "acc_code";
+export type UpdatableField = "quantity" | "min_quantity" | "unit_cost" | "description" | "supplier" | "unit" | "acc_code" | "customer";
 
 // Build a code-aware match index over existing accessories.
 // Two key shapes: C = type|code|description|color|size ; D = type|description|color|size.
+// NOTE: `customer` (ลูกค้า) is deliberately NOT in either key. It's a label, not part
+// of identity, so a sheet row carrying a customer still matches an existing row that
+// has none — which is what lets the updater backfill ลูกค้า onto older entries.
 // `size` is appended as a TIEBREAKER: it's blank on ~98% of rows (a no-op there,
 // identical to matching without it), but on the ~2% that carry a size it separates
 // otherwise-identical size-variants (e.g. the same zip in 5/6/7 นิ้ว) that would
@@ -877,6 +883,7 @@ export async function applyStockUpdates(
     description?: string;
     unit?: string;
     acc_code?: string;
+    customer?: string;
     supplier_id?: string | null;
     current_unit_cost: number; // fallback price if sheet has none
     sheet_has_price: boolean;
@@ -896,6 +903,7 @@ export async function applyStockUpdates(
       if (fields.includes("unit") && u.unit !== undefined) patch.unit = u.unit;
       // acc_code may be intentionally set to "" (to clear a wrongly-stored code)
       if (fields.includes("acc_code") && u.acc_code !== undefined) patch.acc_code = u.acc_code;
+      if (fields.includes("customer") && u.customer !== undefined) patch.customer = u.customer;
       if (fields.includes("supplier") && u.supplier_id !== undefined) patch.supplier_id = u.supplier_id;
       if (Object.keys(patch).length > 0) {
         const { error } = await supabase.from("accessories").update(patch).eq("id", u.accessory_id);

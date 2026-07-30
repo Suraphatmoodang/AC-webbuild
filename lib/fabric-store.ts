@@ -14,6 +14,11 @@ import { supabase } from "./supabase";
 export type { Supplier } from "./store";
 import type { Supplier } from "./store";
 
+// Shown in the เจ้าของ (owner) column for stock WE own — i.e. when `owner` is blank.
+// External/consignment rows show their own factory name instead. One place to change
+// if the operating company is ever renamed.
+export const SELF_OWNER = "AC";
+
 export type Fabric = {
   id: string;
   fabric_type: string;      // ชนิดผ้า — the fabric's name/kind, top of the hierarchy
@@ -30,6 +35,7 @@ export type Fabric = {
   unit_cost: number;        // reference price on the fabric (lots hold the real cost)
   cost_unit: string;        // หน่วยที่ราคาอิงอยู่
   min_quantity: number;
+  owner: string;                // เจ้าของ — factory that owns consignment stock; blank = ours (a label, not identity)
   supplier_id: string | null;   // FK → fabric_suppliers.id (NOT the accessory suppliers table)
   valuation_method: "fifo" | "lifo";
   is_active: boolean;
@@ -67,6 +73,7 @@ export type FabricImportRow = {
   unit: string;
   unit_cost: number;
   cost_unit: string;
+  owner: string;
   supplier_name: string;
   contact_person: string;
   contact_number: string;
@@ -418,7 +425,7 @@ export async function revertFabricTransaction(
 const IMPORT_MATCH_FIELDS = [
   "fabric_type", "composition", "construction", "color", "width",
   "weight", "weight_unit", "row_label", "fabric_code",
-  "unit", "unit_cost", "cost_unit", "supplier_name", "contact_person",
+  "unit", "unit_cost", "cost_unit", "owner", "supplier_name", "contact_person",
   "contact_number", "contact_email", "address", "city", "country",
   "postal_code", "lead_time", "payment_term", "tax_id",
 ] as const;
@@ -579,6 +586,7 @@ export async function approveFabricImports(
         unit: r.unit,
         unit_cost: r.unit_cost,        // reference price (lots hold the real cost)
         cost_unit: r.cost_unit,
+        owner: r.owner,
         min_quantity: r.min_quantity > 0 ? r.min_quantity : 10,
         supplier_id,
         is_active: true,
@@ -785,10 +793,13 @@ export async function adjustFabricLot(lotId: string, newRemaining: number): Prom
 
 export type FabricUpdatableField =
   | "quantity" | "min_quantity" | "unit_cost" | "unit" | "cost_unit"
-  | "composition" | "construction" | "weight" | "width" | "row_label" | "supplier";
+  | "composition" | "construction" | "weight" | "width" | "row_label" | "owner" | "supplier";
 
 // Build a code-aware match index over existing fabrics.
 // Two key shapes: C = type|code|color|width ; D = type|construction|color|width.
+// NOTE: `owner` (เจ้าของ) is deliberately NOT in either key. It's a label, not part of
+// identity, so a sheet row carrying an owner still matches an existing untagged row —
+// which is what lets the updater tag older entries as consignment stock.
 // A row that carries เลขที่ matches precisely on the code; one that omits it falls
 // back to the descriptive fields. Appending a field can only split groups, never
 // merge them, so the extra discriminators introduce no new collisions.
@@ -847,6 +858,7 @@ export async function applyFabricUpdates(
     weight?: number;
     width?: string;
     row_label?: string;
+    owner?: string;
     supplier_id?: string | null;
     current_unit_cost: number; // fallback price if sheet has none
     sheet_has_price: boolean;
@@ -869,6 +881,7 @@ export async function applyFabricUpdates(
       if (fields.includes("weight") && u.weight !== undefined) patch.weight = u.weight;
       if (fields.includes("width") && u.width !== undefined) patch.width = u.width;
       if (fields.includes("row_label") && u.row_label !== undefined) patch.row_label = u.row_label;
+      if (fields.includes("owner") && u.owner !== undefined) patch.owner = u.owner;
       if (fields.includes("supplier") && u.supplier_id !== undefined) patch.supplier_id = u.supplier_id;
       if (Object.keys(patch).length > 0) {
         const { error } = await supabase.from("fabrics").update(patch).eq("id", u.fabric_id);

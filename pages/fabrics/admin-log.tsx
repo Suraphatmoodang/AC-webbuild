@@ -84,6 +84,10 @@ export default function FabricAdminLogPage() {
 
   // ── Summary totals ──
   const totalValue = fabs.reduce((s, f) => s + valueFromLots(lotMap.get(f.id) ?? []), 0);
+  // External (consignment) value: stock held here but owned by another factory.
+  // Counted in the total above, but also broken out on its own.
+  const externalValue = fabs.filter((f) => f.owner.trim() !== "")
+    .reduce((s, f) => s + valueFromLots(lotMap.get(f.id) ?? []), 0);
   const totalIn = txns.filter((t) => t.transaction_type === "IN" || t.transaction_type === "RETURN")
     .reduce((s, t) => s + Math.abs(Number(t.quantity)), 0);
   const totalOut = txns.filter((t) => t.transaction_type === "OUT")
@@ -93,7 +97,8 @@ export default function FabricAdminLogPage() {
     { label: "ผ้าทั้งหมด", val: fabs.length.toLocaleString(), en: "Fabrics" },
     { label: "ซัพพลายเออร์", val: suppliers.length.toLocaleString(), en: "Suppliers" },
     { label: "ชนิดผ้า", val: new Set(fabs.map((f) => f.fabric_type)).size.toLocaleString(), en: "Fabric types" },
-    { label: "มูลค่าสต็อครวม", val: "฿" + totalValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), en: "Stock value", mono: true },
+    { label: "มูลค่าสต็อครวม", val: "฿" + totalValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), en: "Stock value (all)", mono: true },
+    { label: "มูลค่าฝากเก็บ", val: "฿" + externalValue.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), en: "External value", mono: true, color: "var(--accent)" },
     { label: "เพิ่มเข้าระบบ", val: approved.length.toLocaleString(), en: "Added (approved)" },
     { label: "ธุรกรรมทั้งหมด", val: txns.length.toLocaleString(), en: "Transactions" },
     { label: "รับเข้ารวม", val: totalIn.toLocaleString(), en: "Total in", color: "var(--green)" },

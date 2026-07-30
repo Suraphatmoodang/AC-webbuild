@@ -4,13 +4,14 @@ import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { createFabricImportBatch } from "@/lib/fabric-store";
 import { parseFabricSheet, type FabricSheetRow } from "@/lib/fabric-sheet";
+import { OwnerTag } from "@/lib/owner-tag";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
 // Column labels shown in the "expected format" hint, in sheet order.
 const EXPECTED = [
   "ชนิดผ้า", "เส้นใย (Composition)", "โครงสร้าง (Construction)", "สี", "หน้าผ้า",
-  "น้ำหนัก", "หน่วย", "แถว", "เลขที่", "สต็อคคงเหลือ", "หน่วย", "ราคาต่อหน่วย", "หน่วย",
-  "ชื่อบริษัทซัพ", "ผู้ติดต่อ", "เบอร์ติดต่อ", "อีเมล", "ที่อยู่", "จังหวัด", "ประเทศ",
+  "น้ำหนัก", "หน่วย", "แถว", "เลขที่", "สต็อคคงเหลือ", "หน่วย", "ราคาต่อหน่วย", "หน่วย", "ขั้นต่ำ",
+  "เจ้าของ", "ชื่อบริษัทซัพ", "ผู้ติดต่อ", "เบอร์ติดต่อ", "อีเมล", "ที่อยู่", "จังหวัด", "ประเทศ",
   "รหัสไปรษณีย์", "ระยะเวลาส่ง(วัน)", "เทอมจ่ายเงิน", "เลขผู้เสียภาษี",
 ];
 
@@ -129,15 +130,15 @@ export default function FabricImportPage() {
             ตัวอย่างก่อนนำเข้า · {rows.length} รายการ
           </div>
           <div style={{ overflowX: "auto", maxHeight: "60vh", overflowY: "auto" }}>
-            <table style={{ tableLayout: "fixed", minWidth: 1000 }}>
+            <table style={{ tableLayout: "fixed", minWidth: 1080 }}>
               <colgroup>
-                <col style={{ width: "20%" }} /><col style={{ width: "8%" }} /><col style={{ width: "14%" }} />
-                <col style={{ width: "10%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
-                <col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "17%" }} />
+                <col style={{ width: "18%" }} /><col style={{ width: "7%" }} /><col style={{ width: "13%" }} />
+                <col style={{ width: "9%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
+                <col style={{ width: "8%" }} /><col style={{ width: "7%" }} /><col style={{ width: "10%" }} /><col style={{ width: "15%" }} />
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{ whiteSpace: "nowrap" }}>ชนิดผ้า</th><th style={{ whiteSpace: "nowrap" }}>เลขที่</th><th style={{ whiteSpace: "nowrap" }}>โครงสร้าง</th><th style={{ whiteSpace: "nowrap" }}>สี</th><th style={{ whiteSpace: "nowrap" }}>หน้าผ้า</th><th className="num" style={{ whiteSpace: "nowrap" }}>น้ำหนัก</th><th className="num" style={{ whiteSpace: "nowrap" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap" }}>ราคา</th><th style={{ whiteSpace: "nowrap" }}>ซัพพลายเออร์</th>
+                  <th style={{ whiteSpace: "nowrap" }}>ชนิดผ้า</th><th style={{ whiteSpace: "nowrap" }}>เลขที่</th><th style={{ whiteSpace: "nowrap" }}>โครงสร้าง</th><th style={{ whiteSpace: "nowrap" }}>สี</th><th style={{ whiteSpace: "nowrap" }}>หน้าผ้า</th><th className="num" style={{ whiteSpace: "nowrap" }}>น้ำหนัก</th><th className="num" style={{ whiteSpace: "nowrap" }}>สต็อค</th><th className="num" style={{ whiteSpace: "nowrap" }}>ราคา</th><th style={{ whiteSpace: "nowrap" }}>เจ้าของ</th><th style={{ whiteSpace: "nowrap" }}>ซัพพลายเออร์</th>
                 </tr>
               </thead>
               <tbody>
@@ -151,6 +152,7 @@ export default function FabricImportPage() {
                     <td className="num" style={{ fontSize: 14, color: "var(--text2)" }}>{r.weight ? `${r.weight} ${r.weight_unit}` : "—"}</td>
                     <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.quantity.toLocaleString()} {r.unit}</td>
                     <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{r.unit_cost ? `฿${r.unit_cost.toFixed(2)}` : "—"}</td>
+                    <td><OwnerTag owner={r.owner} /></td>
                     <td style={{ fontSize: 14, color: "var(--text2)", wordBreak: "break-word" }}>{r.supplier_name || "—"}</td>
                   </tr>
                 ))}

@@ -16,7 +16,7 @@ type FormData = Omit<Accessory, "id" | "created_at" | "updated_at" | "quantity" 
 };
 
 const emptyForm = (): FormData => ({
-  type: "", acc_code: "", description: "", row: null,
+  type: "", customer: "", acc_code: "", description: "", row: null,
   color: "", size: "", quantity: "", unit: "เส้น",
   unit_cost: "", min_quantity: "", supplier_id: null, valuation_method: "fifo", is_active: true,
 });
@@ -223,6 +223,7 @@ export default function ManagePage() {
 
   const refresh = () => Promise.all([getAccessories(), getLotMap()]).then(([a, lm]) => { setItems(a); setLotMap(lm); });
   const types   = Array.from(new Set(items.map((i) => i.type))).sort();
+  const customers = Array.from(new Set(items.map((i) => i.customer).filter(Boolean))).sort();
 
   const filtered = useMemo(() => items.filter((i) => {
     if (!showInactive && !i.is_active) return false;
@@ -232,6 +233,7 @@ export default function ManagePage() {
     const supName = (suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "").toLowerCase();
     return (
       i.type.toLowerCase().includes(q) ||
+      i.customer.toLowerCase().includes(q) ||
       i.acc_code.toLowerCase().includes(q) ||
       i.description.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
@@ -296,7 +298,7 @@ export default function ManagePage() {
     // (what the table shows), not the accessory's mirror column.
     const curStock = stockFromLots(lotMap.get(item.id) ?? []);
     setForm({
-      type: item.type, acc_code: item.acc_code, description: item.description,
+      type: item.type, customer: item.customer, acc_code: item.acc_code, description: item.description,
       row: item.row, color: item.color, size: item.size, quantity: curStock,
       unit: item.unit, unit_cost: item.unit_cost, min_quantity: item.min_quantity,
       supplier_id: item.supplier_id ?? null, valuation_method: item.valuation_method ?? "fifo", is_active: item.is_active ?? true,
@@ -406,14 +408,14 @@ export default function ManagePage() {
                   <th style={{ width:40, textAlign:"center" }}>
                     <input type="checkbox" checked={allPageSelected} onChange={togglePageAll} style={{ width:"auto", cursor:"pointer" }} />
                   </th>
-                  <th>ประเภท</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
+                  <th>ประเภท</th><th>ลูกค้า</th><th>รหัส</th><th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th>แถว</th>
                   <th>ซัพพลายเออร์</th><th>สต็อค</th><th>หน่วย</th>
                   <th>ราคา</th><th>ขั้นต่ำ</th><th>สถานะ</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={14} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={15} style={{ textAlign:"center", color:"var(--text3)", padding:32 }}>ไม่พบรายการ</td></tr>
                 )}
                 {pg.pageItems.map((item) => (
                   <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.45, background: selected.has(item.id) ? "var(--bg4)" : undefined }}>
@@ -421,6 +423,7 @@ export default function ManagePage() {
                       <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleRow(item.id)} style={{ width:"auto", cursor:"pointer" }} />
                     </td>
                     <td><span className="tag">{item.type}</span></td>
+                    <td style={{ color:"var(--text2)" }}>{item.customer || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.acc_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีรหัส</span>}</td>
                     <td style={{ maxWidth:160 }}>{item.description || "—"}</td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
@@ -480,6 +483,12 @@ export default function ManagePage() {
                   <input value={form.acc_code} onChange={(e) => f("acc_code", e.target.value)}
                     placeholder="เช่น VC-32" />
                 </div>
+              </div>
+
+              <div className="form-row">
+                <label className="form-label">ลูกค้า · Customer</label>
+                <input value={form.customer} onChange={(e) => f("customer", e.target.value)} placeholder="เช่น ดามาร์ท" list="mng-customers" />
+                <datalist id="mng-customers">{customers.map((c) => <option key={c} value={c} />)}</datalist>
               </div>
 
               <div className="form-row">
