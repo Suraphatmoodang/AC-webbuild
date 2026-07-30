@@ -9,6 +9,7 @@ import { compareFabric } from "@/lib/sort";
 import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
 import { OwnerTag } from "@/lib/owner-tag";
 import { OwnerSelect } from "@/lib/owner-select";
+import { exportFabricsXlsx } from "@/lib/stock-export";
 
 type AddForm = {
   fabric_type: string; composition: string; construction: string; color: string;
@@ -42,7 +43,21 @@ export default function FabricStockPage() {
   const [addForm, setAddForm] = useState<AddForm>(emptyAdd());
   const [addErr, setAddErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const n = await exportFabricsXlsx();
+      setToast({ msg: `ส่งออก ${n} รายการแล้ว`, type: "success" });
+    } catch (e: any) {
+      setToast({ msg: "ส่งออกไม่สำเร็จ: " + (e.message ?? ""), type: "error" });
+    } finally {
+      setExporting(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
 
   useEffect(() => {
     Promise.all([getFabrics(), getSuppliers(), getFabricLotMap()])
@@ -175,6 +190,10 @@ export default function FabricStockPage() {
             <option value="external">เฉพาะฝากเก็บ (โรงงานอื่น)</option>
           </select>
         )}
+        <button onClick={handleExport} disabled={exporting}
+          style={{ whiteSpace: "nowrap", background: "var(--green)", borderColor: "var(--green)", color: "#fff", fontWeight: 500 }}>
+          {exporting ? "กำลังส่งออก…" : "⬇ ส่งออก Excel"}
+        </button>
         <button className="primary" onClick={() => { setAddForm(emptyAdd()); setAddErr(""); setShowAdd(true); }}>+ เพิ่มผ้า</button>
         <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)", minWidth: 90, whiteSpace: "nowrap" }}>{filtered.length} รายการ</span>
       </div>

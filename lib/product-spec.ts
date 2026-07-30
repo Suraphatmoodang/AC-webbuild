@@ -1,0 +1,32 @@
+// Garment-spec dropdown option lists, taken from the "add product" Excel. Shared by
+// the products catalog (/costing/products) and the order editor (/costing/[id]) so
+// both offer identical choices. These are the attributes that define a PRODUCT
+// (the reusable garment), as opposed to order-specific data (customer, PO, qty, …).
+
+export const PRODUCT_OPT = {
+  category: ["Top ท่อนบน", "Bottom ท่อนล่าง", "Dress ชุดยาว", "ACC"],
+  type: [
+    "เสื้อโปโล", "Sweather", "เสื้อ bomber jacket", "เสื้อเชิ้ต", "เสื้อแจ็กเก็ต", "เสื้อกล้าม",
+    "เสื้อกั๊ก", "เสื้อกีฬา", "เสื้อคอกลม", "เสื้อคอวี", "เสื้อช็อป", "เสื้อนอน", "เสื้อสครัป",
+    "เสื้อหมวก", "กระโปรง", "กางเกง swim trunk", "กางเกงกระโปรง", "กางเกงขายาวเอวยางยืด",
+    "กางเกงขายาวมีซิป", "กางเกงขาสั้นเอวยางยืด", "กางเกงขาสั้นมีซิป", "กางเกงนอน", "กางเกงวอร์ม",
+    "กางเกงสครัป", "ชุดกระโปรง", "ถุงผ้า", "ปอกหมอน",
+  ],
+  gender: ["unisex ผู้ใหญ่", "unisex เด็ก", "ผู้ชาย", "ผู้หญิง", "เด็กชาย", "เด็กหญิง"],
+  group: ["Casual", "Sportwear", "Workwear"],
+  fabricType: ["100% cotton", "Jersey", "Interlock", "Fleece"],
+  length: ["แขนสั้น", "แขนยาว", "ขาสั้น", "ขายาว"],
+  neck: ["โปโล", "คอกลม", "คอวี"],
+  collar: ["ปอทอ", "ปกผ้าในตัว"],
+  fit: ["Regular", "Oversize", "Fit", "Boxy", "Crop"],
+  opening: ["กระดุม", "ซิป", "สแนป", "เชือก", "ตะขอ"],
+  yesno: ["ไม่มี", "มี"],
+};
+
+// The garment-spec fields that a Product carries and that an order copies from it.
+export const PRODUCT_SPEC_FIELDS = [
+  "style_no", "description", "brand",
+  "product_category", "product_type", "gender", "product_group", "fabric_type",
+  "length_type", "neck", "collar", "fit", "opening", "has_hood", "has_pocket",
+] as const;
+export type ProductSpecField = (typeof PRODUCT_SPEC_FIELDS)[number];

@@ -5,6 +5,7 @@ import { useSession, roleCan } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareAccessory } from "@/lib/sort";
+import { exportAccessoriesXlsx } from "@/lib/stock-export";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -37,7 +38,21 @@ export default function StockPage() {
   const [addForm, setAddForm] = useState<AddForm>(emptyAdd());
   const [addErr, setAddErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const n = await exportAccessoriesXlsx();
+      setToast({ msg: `ส่งออก ${n} รายการแล้ว`, type: "success" });
+    } catch (e: any) {
+      setToast({ msg: "ส่งออกไม่สำเร็จ: " + (e.message ?? ""), type: "error" });
+    } finally {
+      setExporting(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
 
   useEffect(() => {
     Promise.all([getAccessories(), getSuppliers(), getLotMap()])
@@ -132,6 +147,10 @@ export default function StockPage() {
         <button onClick={() => setShowLow(!showLow)}
           style={{ whiteSpace: "nowrap", ...(showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}) }}>
           ⚠ สต็อคต่ำ
+        </button>
+        <button onClick={handleExport} disabled={exporting}
+          style={{ whiteSpace: "nowrap", background: "var(--green)", borderColor: "var(--green)", color: "#fff", fontWeight: 500 }}>
+          {exporting ? "กำลังส่งออก…" : "⬇ ส่งออก Excel"}
         </button>
         <button className="primary" onClick={() => { setAddForm(emptyAdd()); setAddErr(""); setShowAdd(true); }}>+ เพิ่มอุปกรณ์</button>
         <span style={{ alignSelf: "center", fontSize: 17, color: "var(--text3)", minWidth: 90, whiteSpace: "nowrap" }}>{filtered.length} รายการ</span>

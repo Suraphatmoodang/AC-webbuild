@@ -46,17 +46,31 @@ const NAV_FABRIC: NavItem[] = [
   { href: "/fabrics/admin-log", label: "สรุป/บันทึก", en: "Summary 🔒", area: "admin" },
 ];
 
+// Costing (ต้นทุนสินค้า) is a standalone third section — a per-style quotation sheet,
+// not a lot-based inventory. It has no ops/admin split: the pages gate themselves
+// (login required to view; delete is super-only), so the nav items carry no `area`.
+const NAV_COSTING: NavItem[] = [
+  { href: "/costing/products", label: "สินค้า", en: "Products" },
+  // Orders / costing / trends are BUILT but HIDDEN for now: most order work still lives
+  // in Excel, so entering orders here too would be double work. The pages still exist
+  // (reachable by direct URL, super-only). Re-add these items to bring them back:
+  // { href: "/costing", label: "ออเดอร์", en: "Orders" },
+  // { href: "/costing/trends", label: "แนวโน้ม", en: "Trends" },
+];
+
 // "/" is the section picker and "/login" belongs to neither — both render bare
 // (logo only, no nav). Everything under /fabrics is the fabric section.
-function sectionFor(pathname: string): "acc" | "fabric" | "none" {
+function sectionFor(pathname: string): "acc" | "fabric" | "costing" | "none" {
   if (pathname === "/" || pathname === "/login") return "none";
+  if (pathname.startsWith("/costing")) return "costing";
   return pathname.startsWith("/fabrics") ? "fabric" : "acc";
 }
 
 const TITLES = {
-  acc:    { code: "ACC",     word: "STOCK",    href: "/stock" },
-  fabric: { code: "ผ้า",     word: "FABRIC",   href: "/fabrics" },
-  none:   { code: "Apparel", word: "Creations", href: "/" },
+  acc:     { code: "ACC",     word: "STOCK",     href: "/stock" },
+  fabric:  { code: "ผ้า",     word: "FABRIC",    href: "/fabrics" },
+  costing: { code: "ต้นทุน",  word: "COSTING",   href: "/costing" },
+  none:    { code: "Apparel", word: "Creations", href: "/" },
 } as const;
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -73,7 +87,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const authed = role !== null;
   const section = sectionFor(router.pathname);
-  const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC : [];
+  const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC : section === "costing" ? NAV_COSTING : [];
   // Nav visibility:
   //  · public items (no `area`) always show — viewing stock never needs a login.
   //  · LOGGED OUT: gated items still show, so clicking one is what triggers the
@@ -83,7 +97,8 @@ export default function App({ Component, pageProps }: AppProps) {
   const visibleNav = nav.filter((n) => {
     if (!n.area) return true;                 // public: viewing stock never needs a login
     if (role === null) return !!n.guest;      // logged out: ONLY the guest entry point
-    return section !== "none" && roleCan(role, section, n.area);
+    // Only acc/fabric items carry an `area`; costing items never do (handled above).
+    return (section === "acc" || section === "fabric") && roleCan(role, section, n.area);
   });
   const title = TITLES[section];
 

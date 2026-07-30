@@ -140,6 +140,23 @@ export default function HomePage() {
         })}
       </div>
 
+      {/* Orders/costing is super-admin only — hide the entry point from everyone else. */}
+      {role === "super" && (
+        <Link href="/costing" className="card home-card"
+          style={{ display: "block", padding: 20, marginTop: 16, transition: "border-color 0.15s, transform 0.15s" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 21, fontWeight: 500 }}>ออเดอร์ & ต้นทุน</div>
+              <div style={{ fontSize: 15, color: "var(--text3)", letterSpacing: "0.04em" }}>Orders · products · costing</div>
+            </div>
+            <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap" }}>แอดมินสูงสุด</span>
+          </div>
+          <div style={{ fontSize: 14, color: "var(--text2)", marginTop: 8 }}>
+            บันทึกออเดอร์และติดตามสถานะ (เสนอราคา → ผลิต → จัดส่ง) จัดการสินค้า และคิดต้นทุน/ราคาขายจากสต็อคจริง
+          </div>
+        </Link>
+      )}
+
       <div style={{ textAlign: "center", marginTop: 28, fontSize: 14, color: "var(--text3)" }}>
         ซัพพลายเออร์ใช้ฐานข้อมูลเดียวกันทั้งสองระบบ · Suppliers are shared between both systems
       </div>

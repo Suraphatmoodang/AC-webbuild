@@ -147,6 +147,27 @@ tr:hover td { background: var(--bg3); }
 .form-grid-2 { grid-template-columns: 1fr 1fr; }
 .form-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
 
+/* Costing editor: repeatable input rows (fabric lines, trims, size breakdown).
+   Fixed grids on desktop; collapse to a simple 2-up on phones so nothing
+   overflows the card (the surrounding card already scrolls horizontally). */
+.cost-line { display: grid; gap: 8px; align-items: center; margin-bottom: 8px; }
+.cost-line.fabric { grid-template-columns: 1.2fr 1.5fr 84px 104px 30px; }
+.cost-line.extra  { grid-template-columns: 1.6fr 120px 30px; }
+.cost-line.size   { grid-template-columns: 1.4fr repeat(4, 1fr) 72px 30px; }
+.cost-line .cl-x  { background: transparent; border: none; color: var(--text3); font-size: 18px; padding: 0; line-height: 1; }
+.cost-line .cl-x:hover { color: var(--red); background: transparent; }
+@media (max-width: 640px) {
+  .cost-line.fabric, .cost-line.extra { grid-template-columns: 1fr 1fr; }
+  .cost-line.size { grid-template-columns: repeat(4, 1fr); }
+  /* Scoped to the costing editor only — the dense attribute grids collapse to 2-up
+     on phones. Existing modals (also form-grid-3) are untouched: they stay narrow
+     inside their own max-width and never carry .costing-page. */
+  .costing-page .form-grid-3, .costing-page .form-grid-4 { grid-template-columns: 1fr 1fr !important; }
+}
+
+.cost-trends-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .cost-trends-grid { grid-template-columns: 1fr; } }
+
 .toast {
   position: fixed; bottom: 24px; right: 24px;
   background: var(--bg4); border: 1px solid var(--border2);
