@@ -15,6 +15,7 @@
 // it still does the right thing on a sheet that carries only one of the three.
 
 export type FabricSheetRow = {
+  id: string;   // database id, present in exported files (for the updater's "exact" mode)
   fabric_type: string;
   composition: string;
   construction: string;
@@ -51,6 +52,7 @@ type FieldSpec = {
 
 // Declared in sheet order, which is also the order they're resolved in.
 const FIELDS: Record<string, FieldSpec> = {
+  id:             { labels: ["id"] },
   fabric_type:    { labels: ["ชนิดผ้า"], required: true },
   composition:    { labels: ["เส้นใย (Composition)", "เส้นใย", "Composition"] },
   construction:   { labels: ["โครงสร้าง (Construction)", "โครงสร้าง", "Construction"] },
@@ -147,6 +149,7 @@ export function parseFabricSheet(raw: any[][]): { rows: FabricSheetRow[]; cols: 
   const rows = raw.slice(1)
     .filter((r) => str(g(r, "fabric_type")) || str(g(r, "color")))
     .map((r): FabricSheetRow => ({
+      id: str(g(r, "id")),
       fabric_type: str(g(r, "fabric_type")),
       composition: str(g(r, "composition")),
       construction: str(g(r, "construction")),

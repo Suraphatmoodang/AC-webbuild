@@ -109,7 +109,10 @@ export async function getAccessories(activeOnly = false): Promise<Accessory[]> {
   const all: Accessory[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = supabase.from("accessories").select("*").order("type").order("description").range(from, from + PAGE - 1);
+    // `id` is a UNIQUE final sort key: without it, paging by the non-unique type/
+    // description across separate .range() requests can DROP or DUPLICATE rows once the
+    // table exceeds one page (Postgres orders tied rows arbitrarily per request).
+    let q = supabase.from("accessories").select("*").order("type").order("description").order("id").range(from, from + PAGE - 1);
     if (activeOnly) q = q.eq("is_active", true);
     const { data, error } = await q;
     if (error) throw error;
@@ -212,6 +215,7 @@ export async function getTransactions(): Promise<Transaction[]> {
       .from("accessory_transactions")
       .select("*")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -381,6 +385,7 @@ export async function getSuppliers(): Promise<Supplier[]> {
       .from("suppliers")
       .select("*")
       .order("supplier_name")
+      .order("id")   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -490,6 +495,7 @@ export async function getPendingImports(): Promise<ImportRow[]> {
       .select("*")
       .eq("status", "pending")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -509,6 +515,7 @@ export async function getApprovedImports(): Promise<ImportRow[]> {
       .select("*")
       .eq("status", "approved")
       .order("approved_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -665,7 +672,7 @@ export async function getDuplicateMap(): Promise<Map<string, Accessory[]>> {
   const map = new Map<string, Accessory[]>();
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from("accessories").select("*").range(from, from + PAGE - 1);
+    const { data, error } = await supabase.from("accessories").select("*").order("id").range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
     for (const a of data as Accessory[]) {
@@ -686,7 +693,7 @@ export async function getLots(accessoryId?: string): Promise<Lot[]> {
   const all: Lot[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = supabase.from("accessory_lots").select("*").order("effective_date").range(from, from + PAGE - 1);
+    let q = supabase.from("accessory_lots").select("*").order("effective_date").order("id").range(from, from + PAGE - 1);
     if (accessoryId) q = q.eq("accessory_id", accessoryId);
     const { data, error } = await q;
     if (error) throw error;
@@ -888,10 +895,12 @@ export async function applyStockUpdates(
     current_unit_cost: number; // fallback price if sheet has none
     sheet_has_price: boolean;
   }[],
-  fields: UpdatableField[]
+  fields: UpdatableField[],
+  onProgress?: (done: number, total: number) => void   // called after each row (writing is sequential/slow)
 ): Promise<{ updated: number; errors: string[] }> {
   const errors: string[] = [];
   let updated = 0;
+  let done = 0;
 
   for (const u of updates) {
     try {
@@ -933,6 +942,8 @@ export async function applyStockUpdates(
       updated += 1;
     } catch (e: any) {
       errors.push(`${u.accessory_id}: ${e.message ?? "error"}`);
+    } finally {
+      onProgress?.(++done, updates.length);
     }
   }
   return { updated, errors };

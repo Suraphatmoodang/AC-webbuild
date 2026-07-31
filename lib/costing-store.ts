@@ -234,6 +234,7 @@ export async function getCostings(): Promise<ProductCosting[]> {
       .from("product_costings")
       .select("*")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;

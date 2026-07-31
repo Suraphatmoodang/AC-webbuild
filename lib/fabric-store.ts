@@ -123,6 +123,7 @@ export async function getSuppliers(): Promise<Supplier[]> {
       .from("fabric_suppliers")
       .select("*")
       .order("supplier_name")
+      .order("id")   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -172,7 +173,9 @@ export async function getFabrics(activeOnly = false): Promise<Fabric[]> {
   const all: Fabric[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = supabase.from("fabrics").select("*").order("fabric_type").order("color").range(from, from + PAGE - 1);
+    // `id` is a UNIQUE final sort key — without it, paging past 1000 rows by the
+    // non-unique fabric_type/color can drop or duplicate rows (see getAccessories).
+    let q = supabase.from("fabrics").select("*").order("fabric_type").order("color").order("id").range(from, from + PAGE - 1);
     if (activeOnly) q = q.eq("is_active", true);
     const { data, error } = await q;
     if (error) throw error;
@@ -255,6 +258,7 @@ export async function getFabricTransactions(): Promise<FabricTransaction[]> {
       .from("fabric_transactions")
       .select("*")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -462,7 +466,13 @@ export async function createFabricImportBatch(
     toInsert.push(r);
   }
 
-  const payload = toInsert.map((r) => ({ ...r, batch_id, status: "pending" as const }));
+  // FabricSheetRow may carry an `id` column (from an exported file) — it's for the
+  // updater's exact-match mode only and must never be staged into fabric_imports
+  // (whose own id is a generated uuid; a blank string would fail the insert).
+  const payload = toInsert.map((r) => {
+    const { id: _omitId, ...rest } = r as Record<string, any>;
+    return { ...rest, batch_id, status: "pending" as const };
+  });
 
   // 3. Insert in chunks so large imports don't hit request limits.
   const CHUNK = 500;
@@ -483,6 +493,7 @@ export async function getPendingFabricImports(): Promise<FabricImportRow[]> {
       .select("*")
       .eq("status", "pending")
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -502,6 +513,7 @@ export async function getApprovedFabricImports(): Promise<FabricImportRow[]> {
       .select("*")
       .eq("status", "approved")
       .order("approved_at", { ascending: false })
+      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -640,7 +652,7 @@ export async function getFabricDuplicateMap(): Promise<Map<string, Fabric[]>> {
   const map = new Map<string, Fabric[]>();
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from("fabrics").select("*").range(from, from + PAGE - 1);
+    const { data, error } = await supabase.from("fabrics").select("*").order("id").range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
     for (const f of data as Fabric[]) {
@@ -661,7 +673,7 @@ export async function getFabricLots(fabricId?: string): Promise<FabricLot[]> {
   const all: FabricLot[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = supabase.from("fabric_lots").select("*").order("effective_date").range(from, from + PAGE - 1);
+    let q = supabase.from("fabric_lots").select("*").order("effective_date").order("id").range(from, from + PAGE - 1);
     if (fabricId) q = q.eq("fabric_id", fabricId);
     const { data, error } = await q;
     if (error) throw error;
@@ -863,10 +875,12 @@ export async function applyFabricUpdates(
     current_unit_cost: number; // fallback price if sheet has none
     sheet_has_price: boolean;
   }[],
-  fields: FabricUpdatableField[]
+  fields: FabricUpdatableField[],
+  onProgress?: (done: number, total: number) => void   // called after each row (writing is sequential/slow)
 ): Promise<{ updated: number; errors: string[] }> {
   const errors: string[] = [];
   let updated = 0;
+  let done = 0;
 
   for (const u of updates) {
     try {
@@ -910,6 +924,8 @@ export async function applyFabricUpdates(
       updated += 1;
     } catch (e: any) {
       errors.push(`${u.fabric_id}: ${e.message ?? "error"}`);
+    } finally {
+      onProgress?.(++done, updates.length);
     }
   }
   return { updated, errors };

@@ -28,6 +28,7 @@ export default function StockPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
+  const [filterCustomer, setFilterCustomer] = useState("");
   const [showLow, setShowLow] = useState(false);
   const [viewItem, setViewItem] = useState<Accessory | null>(null);
   // Public page — the session only decides whether the "edit in manage" shortcut
@@ -75,6 +76,7 @@ export default function StockPage() {
   const filtered = useMemo(() => items.filter((i) => {
     if (showLow && stockOf(i.id) > i.min_quantity) return false;
     if (filterType && i.type !== filterType) return false;
+    if (filterCustomer && i.customer !== filterCustomer) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -85,11 +87,11 @@ export default function StockPage() {
       i.color.toLowerCase().includes(q) ||
       i.size.toLowerCase().includes(q)
     );
-  }).sort(compareAccessory), [items, lotMap, search, filterType, showLow]);
+  }).sort(compareAccessory), [items, lotMap, search, filterType, filterCustomer, showLow]);
 
   const totalValue = items.reduce((s, i) => s + valueOf(i.id), 0);
   const lowCount = items.filter((i) => stockOf(i.id) <= Number(i.min_quantity)).length;
-  const pg = usePagination(filtered, `${search}|${filterType}|${showLow}`);
+  const pg = usePagination(filtered, `${search}|${filterType}|${filterCustomer}|${showLow}`);
 
   const af = (field: keyof AddForm, val: string) => { setAddForm((p) => ({ ...p, [field]: val })); setAddErr(""); };
 
@@ -143,6 +145,10 @@ export default function StockPage() {
         <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ width: "auto", minWidth: 160 }}>
           <option value="">ทุกประเภท</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select value={filterCustomer} onChange={(e) => setFilterCustomer(e.target.value)} style={{ width: "auto", minWidth: 150 }}>
+          <option value="">ทุกลูกค้า</option>
+          {customers.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <button onClick={() => setShowLow(!showLow)}
           style={{ whiteSpace: "nowrap", ...(showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}) }}>

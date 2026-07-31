@@ -87,11 +87,14 @@ function writeSheet(header: (string | number)[], rows: (string | number)[][], fi
 const th = (a: string, b: string) => String(a ?? "").localeCompare(String(b ?? ""), "th");
 
 // ── Accessories ──────────────────────────────────────────────────────
+// The trailing `id` column carries each item's database id so the updater's "exact"
+// mode can match a re-uploaded export back to the exact same rows with zero ambiguity.
+// The importer ignores unknown headers, so exported files still round-trip through /import.
 const ACC_HEADER: string[] = [
   "ชนิดอุปกรณ์", "ลูกค้า", "รหัสสินค้า", "รายละเอียด", "แถว\r\n(เฉพาะด้าย)", "สี", "ขนาด",
   "สต็อคคงเหลือ", "หน่วย", "ราคาซื้อ", "ขั้นต่ำ",
   "ชื่อบริษัทซัพ", "ผู้ติดต่อ", "เบอร์ติดต่อ", "อีเมล", "ที่อยู่", "จังหวัด", "ประเทศ",
-  "รหัสไปรษณีย์", "ระยะเวลาส่ง(วัน)", "เทอมจ่ายเงิน", "เลขผู้เสียภาษี",
+  "รหัสไปรษณีย์", "ระยะเวลาส่ง(วัน)", "เทอมจ่ายเงิน", "เลขผู้เสียภาษี", "id",
 ];
 
 export async function exportAccessoriesXlsx(): Promise<number> {
@@ -107,17 +110,20 @@ export async function exportAccessoriesXlsx(): Promise<number> {
     a.row ?? "", a.color, a.size,
     stockMap.get(a.id) ?? 0, a.unit, Number(a.unit_cost) || 0, Number(a.min_quantity) || 0,
     ...supplierCells(a.supplier_id ? supMap.get(a.supplier_id) : undefined),
+    a.id,
   ]);
   writeSheet(ACC_HEADER, rows, `สต็อคอุปกรณ์ ${thaiDateCode()}.xlsx`);
   return rows.length;
 }
 
 // ── Fabrics ──────────────────────────────────────────────────────────
+// Trailing `id` column — see ACC_HEADER: lets the fabric updater's "exact" mode match
+// a re-uploaded export back to the exact rows. Importer ignores it, so round-trip is safe.
 const FAB_HEADER: string[] = [
   "ชนิดผ้า", "เส้นใย (Composition)", "โครงสร้าง (Construction)", "สี", "หน้าผ้า",
   "น้ำหนัก", "หน่วย", "แถว", "เลขที่", "สต็อคคงเหลือ", "หน่วย", "ราคาต่อหน่วย", "หน่วย",
   "ชื่อบริษัทซัพ", "ผู้ติดต่อ", "เบอร์ติดต่อ", "อีเมล", "ที่อยู่", "จังหวัด", "ประเทศ",
-  "รหัสไปรษณีย์", "ระยะเวลาส่ง(วัน)", "เทอมจ่ายเงิน", "เลขผู้เสียภาษี",
+  "รหัสไปรษณีย์", "ระยะเวลาส่ง(วัน)", "เทอมจ่ายเงิน", "เลขผู้เสียภาษี", "id",
 ];
 
 export async function exportFabricsXlsx(): Promise<number> {
@@ -133,6 +139,7 @@ export async function exportFabricsXlsx(): Promise<number> {
     Number(f.weight) || 0, f.weight_unit, f.row_label, f.fabric_code,
     stockMap.get(f.id) ?? 0, f.unit, Number(f.unit_cost) || 0, f.cost_unit,
     ...supplierCells(f.supplier_id ? supMap.get(f.supplier_id) : undefined),
+    f.id,
   ]);
   writeSheet(FAB_HEADER, rows, `สต็อคผ้า ${thaiDateCode()}.xlsx`);
   return rows.length;

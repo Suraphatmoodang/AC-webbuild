@@ -12,7 +12,11 @@ import { useSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
 
 // `external` = value of stock owned by ANOTHER company (fabric consignment; owner set).
 // Undefined on the accessory side, which has no ownership concept.
-type Stat = { items: number; value: number; external?: number } | null;
+// `byCustomer` = accessory value/item-count grouped by ลูกค้า (undefined on fabrics).
+type CustBreak = { customer: string; items: number; value: number };
+type Stat = { items: number; value: number; external?: number; byCustomer?: CustBreak[] } | null;
+
+const NO_CUSTOMER = "ไม่ระบุลูกค้า";
 
 const SECTIONS: { href: string; section: Section; title: string; en: string; blurb: string }[] = [
   {
@@ -36,6 +40,9 @@ export default function HomePage() {
   const { role } = useSession();
   const [acc, setAcc] = useState<Stat>(null);
   const [fab, setFab] = useState<Stat>(null);
+  const [showAllCust, setShowAllCust] = useState(false);
+
+  const CUST_PREVIEW = 5;   // how many customers to show before "ดูทั้งหมด"
 
   // useRequireAccess bounces here with ?denied=<section> when a role opens
   // the other section's admin pages. Both stock pages stay publicly viewable, so
@@ -46,10 +53,22 @@ export default function HomePage() {
     // Each side loads independently: a missing/empty fabric table must not stop
     // the accessory card from rendering (and vice versa), so no Promise.all here.
     Promise.all([getAccessories(), getLotMap()])
-      .then(([items, lm]) => setAcc({
-        items: items.length,
-        value: items.reduce((s, a) => s + accValue(lm.get(a.id) ?? []), 0),
-      }))
+      .then(([items, lm]) => {
+        // Group value + item count by customer (blank → NO_CUSTOMER), high value first.
+        const by = new Map<string, CustBreak>();
+        let value = 0;
+        for (const a of items) {
+          const v = accValue(lm.get(a.id) ?? []);
+          value += v;
+          const key = a.customer.trim() || NO_CUSTOMER;
+          const cur = by.get(key) ?? { customer: key, items: 0, value: 0 };
+          cur.items += 1;
+          cur.value += v;
+          by.set(key, cur);
+        }
+        const byCustomer = Array.from(by.values()).sort((x, y) => y.value - x.value);
+        setAcc({ items: items.length, value, byCustomer });
+      })
       .catch(() => setAcc({ items: 0, value: 0 }));
 
     Promise.all([getFabrics(), getFabricLotMap()])
@@ -132,6 +151,31 @@ export default function HomePage() {
                         </span>
                       </div>
                     ) : null}
+
+                    {/* Accessory value/items broken down per customer (kept below the total). */}
+                    {s.section === "acc" && st.byCustomer && st.byCustomer.length > 0 && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
+                        <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>ตามลูกค้า</div>
+                        {(showAllCust ? st.byCustomer : st.byCustomer.slice(0, CUST_PREVIEW)).map((c) => (
+                          <div key={c.customer} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" }}>
+                            <span style={{ color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {c.customer} <span style={{ color: "var(--text3)" }}>· {c.items.toLocaleString()} รายการ</span>
+                            </span>
+                            <span style={{ fontFamily: "var(--mono)", color: "var(--text2)", flexShrink: 0 }}>
+                              ฿{c.value.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                            </span>
+                          </div>
+                        ))}
+                        {st.byCustomer.length > CUST_PREVIEW && (
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAllCust((v) => !v); }}
+                            style={{ background: "transparent", border: "none", padding: "4px 0 0", color: "var(--accent)", fontSize: 12, cursor: "pointer" }}
+                          >
+                            {showAllCust ? "ย่อ" : `ดูทั้งหมด (${st.byCustomer.length})`}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>

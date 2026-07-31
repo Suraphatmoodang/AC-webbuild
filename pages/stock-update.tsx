@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import * as XLSX from "xlsx";
 import { buildAccessoryMatchIndex, matchKeyForRow, applyStockUpdates, getSuppliers,
@@ -9,6 +9,7 @@ import { SearchInput } from "@/lib/search";
 
 // Header-name → field mapping (same sheet layout as the importer)
 const HEADER_MAP: Record<string, string[]> = {
+  id: ["id"],
   type: ["ชนิดอุปกรณ์"], customer: ["ลูกค้า"], acc_code: ["รหัสสินค้า"], description: ["รายละเอียด"],
   color: ["สี"], size: ["ขนาด"], quantity: ["สต็อคคงเหลือ", "สต็อค"],
   unit: ["หน่วย"], unit_cost: ["ราคาซื้อ"], min_quantity: ["ขั้นต่ำ"],
@@ -30,28 +31,61 @@ const UPDATE_COLUMNS: { field: UpdatableField; label: string; sheetKey: string }
   { field: "supplier",     label: "ซัพพลายเออร์",  sheetKey: "supplier_name" },
 ];
 
-type Row = {
+// A parsed sheet row (no match info yet). `id` is the database id column present in
+// exported files; blank when the sheet wasn't produced by the exporter.
+type BaseRow = {
+  id: string;
   type: string; customer: string; acc_code: string; description: string; color: string; size: string;
   quantity: number; unit_cost: number; min_quantity: number; unit: string; supplier_name: string;
+};
+type MatchMode = "exact" | "find";
+type MatchData = { identity: Map<string, Accessory[]>; byId: Map<string, Accessory> };
+
+type Row = BaseRow & {
   _match: "one" | "multi" | "none";
   _matchId?: string;
   _matched?: Accessory;   // the single matched accessory (for "already up to date" checks)
+  _matches?: Accessory[]; // all matched items — kept for "multi" so we can show the clash
   _matchCount: number;
 };
 
+// Match a parsed row against existing items. Exact mode matches by database id (from an
+// export) — fault-free; find mode matches by identity key (type/desc/color/size, ± code).
+function computeRows(base: BaseRow[], mode: MatchMode, data: MatchData | null): Row[] {
+  if (!data) return [];
+  return base.map((b) => {
+    const matches = mode === "exact"
+      ? (b.id && data.byId.has(b.id) ? [data.byId.get(b.id)!] : [])
+      : (data.identity.get(matchKeyForRow(b)) ?? []);
+    const _match = matches.length === 0 ? "none" : matches.length === 1 ? "one" : "multi";
+    return {
+      ...b, _match,
+      _matchId: matches.length === 1 ? matches[0].id : undefined,
+      _matched: matches.length === 1 ? matches[0] : undefined,
+      _matches: matches.length > 1 ? matches : undefined,
+      _matchCount: matches.length,
+    };
+  });
+}
+
 export default function StockUpdatePage() {
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>([]);
+  const [baseRows, setBaseRows] = useState<BaseRow[]>([]);
+  const [matchData, setMatchData] = useState<MatchData | null>(null);
+  const [matchMode, setMatchMode] = useState<MatchMode>("find");
+  const rows = useMemo(() => computeRows(baseRows, matchMode, matchData), [baseRows, matchMode, matchData]);
   const [sheetCols, setSheetCols] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<Set<UpdatableField>>(new Set());
   const [overwrite, setOverwrite] = useState(false); // apply even when values already match
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [fileName, setFileName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set()); // by row index
-  const [hideUnmatched, setHideUnmatched] = useState(false);
+  const [matchFilter, setMatchFilter] = useState<"all" | "one" | "multi" | "none">("all");
+  const [pageSize, setPageSize] = useState(250);
   const [search, setSearch] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<null | { updated: number; failed: number }>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -86,34 +120,36 @@ export default function StockUpdatePage() {
 
       const g = (r: any[], f: string) => { const i = colIdx[f]; return i >= 0 ? r[i] : undefined; };
 
-      // Build match index over existing accessories
-      const index = await buildAccessoryMatchIndex();
+      // Build match index over existing accessories, plus an id→item map for exact mode.
+      const identity = await buildAccessoryMatchIndex();
+      const byId = new Map<string, Accessory>();
+      identity.forEach((arr) => arr.forEach((a) => byId.set(a.id, a)));
+      const data: MatchData = { identity, byId };
 
-      const parsed: Row[] = raw.slice(1)
+      const base: BaseRow[] = raw.slice(1)
         .filter((r) => str(g(r, "type")) || str(g(r, "description")))
-        .map((r) => {
-          const base = {
-            type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
-            color: str(g(r, "color")), size: str(g(r, "size")),
-            quantity: num(g(r, "quantity")), unit_cost: num(g(r, "unit_cost")),
-            min_quantity: num(g(r, "min_quantity")), unit: str(g(r, "unit")), supplier_name: str(g(r, "supplier_name")),
-          };
-          const key = matchKeyForRow(base);
-          const matches = index.get(key) ?? [];
-          const _match = matches.length === 0 ? "none" : matches.length === 1 ? "one" : "multi";
-          return { ...base, _match, _matchId: matches.length === 1 ? matches[0].id : undefined,
-            _matched: matches.length === 1 ? matches[0] : undefined, _matchCount: matches.length };
-        });
-      setRows(parsed);
-      // default mode: whatever updatable columns exist in the sheet, minus nothing preselected
+        .map((r) => ({
+          id: str(g(r, "id")),
+          type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
+          color: str(g(r, "color")), size: str(g(r, "size")),
+          quantity: num(g(r, "quantity")), unit_cost: num(g(r, "unit_cost")),
+          min_quantity: num(g(r, "min_quantity")), unit: str(g(r, "unit")), supplier_name: str(g(r, "supplier_name")),
+        }));
+
+      // Default to exact matching when the file carries ids (an export); else find-and-match.
+      const hasIds = present.has("id") && base.some((b) => b.id);
+      const startMode: MatchMode = hasIds ? "exact" : "find";
+      setMatchData(data);
+      setBaseRows(base);
+      setMatchMode(startMode);
       setMode(new Set());
       setSelected(new Set());
       const counts = { one: 0, multi: 0, none: 0 } as Record<string, number>;
-      parsed.forEach((p) => counts[p._match]++);
+      computeRows(base, startMode, data).forEach((p) => counts[p._match]++);
       showToast(`อ่านไฟล์: ตรงกัน ${counts.one} · ซ้ำ ${counts.multi} · ไม่พบ ${counts.none}`, "success");
     } catch (err: any) {
       showToast("อ่านไฟล์ไม่สำเร็จ: " + (err.message ?? ""), "error");
-      setRows([]);
+      setBaseRows([]);
     }
   };
 
@@ -159,16 +195,16 @@ export default function StockUpdatePage() {
   // Selectable = single match AND (no mode chosen yet, or at least one selected field differs)
   const isSelectable = (r: Row) => r._match === "one" && !isNoop(r);
 
-  // Visible rows (search + optional hide-unmatched)
+  // Visible rows (status filter + search)
   const visible = rows.map((r, i) => ({ r, i })).filter(({ r }) => {
-    if (hideUnmatched && r._match !== "one") return false;
+    if (matchFilter !== "all" && r._match !== matchFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
       r.acc_code.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
   });
 
-  const pg = usePagination(visible, `${search}|${hideUnmatched}`, 250);
+  const pg = usePagination(visible, `${search}|${matchFilter}`, pageSize);
 
   // Only single-match rows that would actually change are selectable
   const selectableOnPage = pg.pageItems.filter(({ r }) => isSelectable(r)).map(({ i }) => i);
@@ -179,6 +215,9 @@ export default function StockUpdatePage() {
     else selectableOnPage.forEach((i) => next.add(i));
     setSelected(next);
   };
+  // Every selectable row across ALL pages (respects the current filter/search).
+  const selectableAll = visible.filter(({ r }) => isSelectable(r)).map(({ i }) => i);
+  const selectAllMatched = () => setSelected(new Set(selectableAll));
   const toggleRow = (i: number) => {
     const next = new Set(selected);
     next.has(i) ? next.delete(i) : next.add(i);
@@ -186,7 +225,7 @@ export default function StockUpdatePage() {
   };
 
   const deleteUnmatched = () => {
-    setRows((prev) => prev.filter((r) => r._match === "one"));
+    setBaseRows((prev) => prev.filter((_, i) => rows[i]?._match === "one"));
     setSelected(new Set());
     showToast("ลบรายการที่ไม่ตรงออกแล้ว", "success");
   };
@@ -194,15 +233,15 @@ export default function StockUpdatePage() {
   const doApply = async () => {
     const fields = Array.from(mode);
     if (fields.length === 0) { showToast("กรุณาเลือกคอลัมน์ที่จะอัปเดต", "error"); return; }
-    const chosen = Array.from(selected).map((i) => rows[i]).filter((r) => r && r._match === "one" && r._matchId && !isNoop(r));
+    const chosenIdx = Array.from(selected).filter((i) => rows[i] && rows[i]._match === "one" && rows[i]._matchId && !isNoop(rows[i]));
+    const chosen = chosenIdx.map((i) => rows[i]);
     if (chosen.length === 0) { showToast("ไม่มีรายการที่ต้องอัปเดต (ค่าตรงกันอยู่แล้ว)", "error"); return; }
 
     setSaving(true);
+    setProgress({ done: 0, total: chosen.length });
     try {
-      // need current unit cost of each matched accessory for price fallback
-      const index = await buildAccessoryMatchIndex();
-      const byId = new Map<string, Accessory>();
-      Array.from(index.values()).forEach((arr) => arr.forEach((a) => byId.set(a.id, a)));
+      // current unit cost of each matched item (price fallback) — from the index we already built
+      const byId = matchData?.byId ?? new Map<string, Accessory>();
 
       const updates = chosen.map((r) => ({
         accessory_id: r._matchId!,
@@ -221,16 +260,16 @@ export default function StockUpdatePage() {
         sheet_has_price: sheetCols.has("unit_cost"),
       }));
 
-      const { updated, errors } = await applyStockUpdates(updates, fields);
+      const { updated, errors } = await applyStockUpdates(updates, fields, (d, t) => setProgress({ done: d, total: t }));
       setConfirm(false);
       setResult({ updated, failed: errors.length });
-      // Remove applied rows from the list
-      const appliedIds = new Set(chosen.map((r) => r._matchId));
-      setRows((prev) => prev.filter((r) => !appliedIds.has(r._matchId)));
+      // Remove applied rows from the list (by their index in baseRows)
+      const applied = new Set(chosenIdx);
+      setBaseRows((prev) => prev.filter((_, i) => !applied.has(i)));
       setSelected(new Set());
     } catch (e: any) {
       showToast("เกิดข้อผิดพลาด: " + (e.message ?? ""), "error");
-    } finally { setSaving(false); }
+    } finally { setSaving(false); setProgress(null); }
   };
 
   if (!authed) return null;
@@ -269,6 +308,31 @@ export default function StockUpdatePage() {
           </div>
         )}
       </div>
+
+      {/* Match mode — exact (by id, from an export) vs find-and-match (by identity) */}
+      {rows.length > 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 14, color: "var(--text2)", marginBottom: 10 }}>วิธีจับคู่</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => { setMatchMode("exact"); setSelected(new Set()); }} disabled={!sheetCols.has("id")}
+              style={{ fontSize: 14, padding: "8px 14px", opacity: sheetCols.has("id") ? 1 : 0.4,
+                ...(matchMode === "exact" ? { background: "var(--accent)", color: "#0f0f0f", borderColor: "var(--accent)" } : {}) }}
+              title={sheetCols.has("id") ? "" : "ไฟล์นี้ไม่มีคอลัมน์ id (ต้องเป็นไฟล์ที่ส่งออกจากระบบ)"}>
+              ตรงกันเป๊ะจาก id{!sheetCols.has("id") && " (ไม่มี id ในไฟล์)"}
+            </button>
+            <button onClick={() => { setMatchMode("find"); setSelected(new Set()); }}
+              style={{ fontSize: 14, padding: "8px 14px",
+                ...(matchMode === "find" ? { background: "var(--accent)", color: "#0f0f0f", borderColor: "var(--accent)" } : {}) }}>
+              ค้นหาและจับคู่ (ชนิด/รายละเอียด/สี/ขนาด)
+            </button>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 13, color: "var(--text3)" }}>
+            {matchMode === "exact"
+              ? "จับคู่ด้วยรหัสระบบ (id) จากไฟล์ที่ส่งออก — อัปเดตตรงรายการเดิมแบบไม่มีพลาด แม้แก้คอลัมน์อื่น"
+              : "จับคู่ด้วยคุณสมบัติสินค้า — ใช้กับไฟล์ที่ไม่มี id (การแก้ ชนิด/รายละเอียด/สี/ขนาด อาจทำให้จับคู่ไม่ได้)"}
+          </div>
+        </div>
+      )}
 
       {/* Column-picker mode */}
       {rows.length > 0 && (
@@ -318,10 +382,35 @@ export default function StockUpdatePage() {
       {rows.length > 0 && (
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
           <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา…" style={{ flex: "1 1 200px" }} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "var(--text2)", cursor: "pointer" }}>
-            <input type="checkbox" checked={hideUnmatched} onChange={(e) => setHideUnmatched(e.target.checked)} style={{ width: "auto" }} />
-            ซ่อนที่ไม่ตรง
-          </label>
+          {/* Status filter — click ซ้ำ / ไม่พบ to isolate the rows that didn't match, for diagnosing. */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {([
+              ["all", "ทั้งหมด", rows.length, "var(--text2)"],
+              ["one", "ตรงกัน", counts.one, "var(--green)"],
+              ["multi", "ซ้ำ", counts.multi, "var(--accent)"],
+              ["none", "ไม่พบ", counts.none, "var(--red)"],
+            ] as const).map(([key, label, n, color]) => (
+              <button key={key} onClick={() => setMatchFilter(key)}
+                style={{ fontSize: 14, padding: "7px 12px", whiteSpace: "nowrap",
+                  ...(matchFilter === key ? { background: "var(--accent)", color: "#0f0f0f", borderColor: "var(--accent)" }
+                                          : { color }) }}>
+                {label} {n}
+              </button>
+            ))}
+          </div>
+          {/* Rows per page — bump it up to scroll through many ไม่พบ/ซ้ำ rows while diagnosing. */}
+          <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ width: "auto" }} title="จำนวนแถวต่อหน้า">
+            <option value={100}>100 / หน้า</option>
+            <option value={250}>250 / หน้า</option>
+            <option value={1000}>1000 / หน้า</option>
+            <option value={100000}>ทั้งหมด</option>
+          </select>
+          {selectableAll.length > 0 && (
+            <button onClick={selectAllMatched}>เลือกทั้งหมดที่ตรงกัน ({selectableAll.length})</button>
+          )}
+          {selected.size > 0 && (
+            <button onClick={() => setSelected(new Set())}>ล้างการเลือก</button>
+          )}
           {(counts.multi > 0 || counts.none > 0) && (
             <button onClick={deleteUnmatched}>ลบรายการที่ไม่ตรงออก ({counts.multi + counts.none})</button>
           )}
@@ -375,7 +464,13 @@ export default function StockUpdatePage() {
                         {r._match === "one"
                           ? (noop ? <span style={{ fontSize: 14, color: "var(--text3)" }}>ค่าตรงกันแล้ว</span>
                                   : <span style={{ fontSize: 14, color: "var(--green)" }}>✓ ตรงกัน</span>)
-                          : r._match === "multi" ? <span className="badge badge-low">ซ้ำ {r._matchCount}</span>
+                          : r._match === "multi"
+                            ? <span className="badge badge-low" style={{ cursor: "help" }}
+                                title={"จับคู่ได้หลายรายการ (customer / code ต่างกันแต่ระบุตัวไม่ได้):\n" +
+                                  (r._matches ?? []).map((a, k) => `${k + 1}. ${[a.type, a.description, a.color, a.size].filter(Boolean).join(" · ")}` +
+                                    `  [ลูกค้า: ${a.customer || "—"} · รหัส: ${a.acc_code || "—"}]`).join("\n")}>
+                                ซ้ำ {r._matchCount}
+                              </span>
                           : <span className="badge badge-out">ไม่พบ</span>}
                       </td>
                     </tr>
@@ -447,6 +542,31 @@ export default function StockUpdatePage() {
             <div className="modal-footer">
               <button onClick={() => setResult(null)}>ปิด</button>
               <button className="primary" onClick={() => router.push("/stock")}>ไปที่หน้าสต็อค</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Write progress — updates are written one row at a time, so this tracks it live */}
+      {progress && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight: 500, color: "var(--accent)" }}>กำลังอัปเดต…</div>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--text2)", marginBottom: 8 }}>
+                <span>อัปเดตแล้ว</span>
+                <span style={{ fontFamily: "var(--mono)" }}>
+                  {progress.done.toLocaleString()} / {progress.total.toLocaleString()}
+                  {progress.total > 0 && <span style={{ color: "var(--text3)" }}> ({Math.round((progress.done / progress.total) * 100)}%)</span>}
+                </span>
+              </div>
+              <div style={{ height: 10, background: "var(--bg3)", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%`,
+                  background: "var(--accent)", transition: "width 0.15s ease" }} />
+              </div>
+              <p style={{ fontSize: 13, color: "var(--text3)", marginTop: 10 }}>กรุณาอย่าปิดหน้านี้จนกว่าจะเสร็จ</p>
             </div>
           </div>
         </div>
