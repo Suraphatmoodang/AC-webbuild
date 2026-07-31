@@ -9,11 +9,14 @@ import {
   getPriceSources,
   computeCosting,
   ORDER_STATUSES,
+  DEFAULT_SIZE_LABELS,
+  type SizeRow,
   type CostingInput,
   type PriceOption,
 } from "@/lib/costing-store";
 import { getProducts, addProduct, productLabel, type Product, type ProductInput } from "@/lib/product-store";
-import { PRODUCT_OPT as OPT } from "@/lib/product-spec";
+import { PRODUCT_OPT as OPT, buildComboOptions } from "@/lib/product-spec";
+import { Combo } from "@/lib/combo";
 
 // Preset trim/print/packaging chips (per piece), mirrored from the GKM app.
 const EXTRA_PRESETS = [
@@ -24,7 +27,10 @@ const EXTRA_PRESETS = [
 
 // ── Form state: all numeric fields held as strings so they can be blanked and
 // typed freely (incl. decimals like 0.5). Coerced to numbers only in toInput(). ──
-type SizeRowF = { color: string; s: string; m: string; l: string; xl: string };
+// Per-order dynamic size columns (labels held in form.size_labels). Quantities are
+// held as strings keyed by label so cells can be blanked; they should sum to the total.
+type SizeRowF = { color: string; qty: Record<string, string> };
+const emptySizeRow = (): SizeRowF => ({ color: "", qty: {} });
 type FabricLineF = { label: string; fabric_id: string | null; yard_per_pc: string; price_per_yard: string };
 type ExtraLineF = { label: string; accessory_id: string | null; amount: string };
 
@@ -36,6 +42,7 @@ type FormState = {
   fabric_type: string; length_type: string; neck: string; collar: string; fit: string;
   opening: string; has_hood: string; has_pocket: string;
   order_qty: string; color_count: string; size_count: string; shipment: string;
+  size_labels: string[];
   size_breakdown: SizeRowF[];
   embroidery_count: string; print_count: string; sublimation: string; iron_count: string;
   fabric_lines: FabricLineF[];
@@ -53,6 +60,7 @@ const emptyForm = (): FormState => ({
   fabric_type: "", length_type: "", neck: "", collar: "", fit: "",
   opening: "", has_hood: "", has_pocket: "",
   order_qty: "", color_count: "", size_count: "", shipment: "",
+  size_labels: [...DEFAULT_SIZE_LABELS],
   size_breakdown: [],
   embroidery_count: "", print_count: "", sublimation: "", iron_count: "",
   fabric_lines: [],
@@ -78,7 +86,11 @@ function fromCosting(c: any): FormState {
     neck: c.neck ?? "", collar: c.collar ?? "", fit: c.fit ?? "", opening: c.opening ?? "",
     has_hood: c.has_hood ?? "", has_pocket: c.has_pocket ?? "",
     order_qty: s(c.order_qty), color_count: s(c.color_count), size_count: s(c.size_count), shipment: c.shipment ?? "",
-    size_breakdown: (c.size_breakdown ?? []).map((r: any) => ({ color: r.color ?? "", s: s(r.s), m: s(r.m), l: s(r.l), xl: s(r.xl) })),
+    size_labels: Array.isArray(c.size_labels) && c.size_labels.length ? c.size_labels.map(String) : [...DEFAULT_SIZE_LABELS],
+    size_breakdown: (c.size_breakdown ?? []).map((r: any) => ({
+      color: r.color ?? "",
+      qty: Object.fromEntries(Object.entries(r.qty ?? {}).map(([k, v]) => [k, s(v as number)])),
+    })),
     embroidery_count: s(c.embroidery_count), print_count: s(c.print_count), sublimation: s(c.sublimation), iron_count: s(c.iron_count),
     fabric_lines: (c.fabric_lines ?? []).map((f: any) => ({ label: f.label ?? "", fabric_id: f.fabric_id ?? null, yard_per_pc: s(f.yard_per_pc), price_per_yard: s(f.price_per_yard) })),
     extras: (c.extras ?? []).map((e: any) => ({ label: e.label ?? "", accessory_id: e.accessory_id ?? null, amount: s(e.amount) })),
@@ -99,7 +111,11 @@ function toInput(f: FormState, role: Role | null): CostingInput {
     neck: f.neck, collar: f.collar, fit: f.fit, opening: f.opening,
     has_hood: f.has_hood, has_pocket: f.has_pocket,
     order_qty: n(f.order_qty), color_count: n(f.color_count), size_count: n(f.size_count), shipment: f.shipment.trim(),
-    size_breakdown: f.size_breakdown.map((r) => ({ color: r.color.trim(), s: n(r.s), m: n(r.m), l: n(r.l), xl: n(r.xl) })),
+    size_labels: f.size_labels,
+    size_breakdown: f.size_breakdown.map((r) => ({
+      color: r.color.trim(),
+      qty: Object.fromEntries(f.size_labels.map((L) => [L, n(r.qty[L] ?? "")])),
+    })),
     embroidery_count: n(f.embroidery_count), print_count: n(f.print_count), sublimation: n(f.sublimation), iron_count: n(f.iron_count),
     fabric_lines: f.fabric_lines.map((l) => ({ label: l.label.trim(), fabric_id: l.fabric_id, yard_per_pc: n(l.yard_per_pc), price_per_yard: n(l.price_per_yard) })),
     extras: f.extras.map((e) => ({ label: e.label.trim(), accessory_id: e.accessory_id, amount: n(e.amount) })),
@@ -151,6 +167,7 @@ export default function CostingEditor() {
   const [prices, setPrices] = useState<{ fabrics: PriceOption[]; accessories: PriceOption[] }>({ fabrics: [], accessories: [] });
   const [products, setProducts] = useState<Product[]>([]);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [newSize, setNewSize] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   const notify = (msg: string, type: "success" | "error" = "success") => {
@@ -236,6 +253,8 @@ export default function CostingEditor() {
   };
 
   const bd = useMemo(() => computeCosting(toInput(form, role)), [form, role]);
+  // Type-or-pick options: presets + distinct values already saved in the catalog.
+  const comboOpts = useMemo(() => buildComboOptions(products), [products]);
   const orderQty = n(form.order_qty);
   const statusColor = (ORDER_STATUSES.find((st) => st.key === form.status) ?? ORDER_STATUSES[0]).color;
 
@@ -262,10 +281,27 @@ export default function CostingEditor() {
   };
 
   // ── Size breakdown ──
-  const addSizeRow = () => set("size_breakdown", [...form.size_breakdown, { color: "", s: "", m: "", l: "", xl: "" }]);
-  const updSizeRow = (i: number, patch: Partial<SizeRowF>) =>
-    set("size_breakdown", form.size_breakdown.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const sizeRowTotal = (r: SizeRowF) => n(r.s) + n(r.m) + n(r.l) + n(r.xl);
+  const addSizeRow = () => set("size_breakdown", [...form.size_breakdown, emptySizeRow()]);
+  const updSizeColor = (i: number, color: string) =>
+    set("size_breakdown", form.size_breakdown.map((r, j) => (j === i ? { ...r, color } : r)));
+  const updSizeCell = (i: number, label: string, val: string) =>
+    set("size_breakdown", form.size_breakdown.map((r, j) => (j === i ? { ...r, qty: { ...r.qty, [label]: val } } : r)));
+  const sizeRowTotal = (r: SizeRowF) => form.size_labels.reduce((t, L) => t + n(r.qty[L] ?? ""), 0);
+
+  // ── Size columns (labels) — each order chooses its own; sizes vary per job. ──
+  const addSizeCol = (raw: string) => {
+    const label = raw.trim();
+    if (!label || form.size_labels.includes(label)) return;
+    set("size_labels", [...form.size_labels, label]);
+    setNewSize("");
+  };
+  const removeSizeCol = (label: string) => {
+    set("size_labels", form.size_labels.filter((L) => L !== label));
+    set("size_breakdown", form.size_breakdown.map((r) => {
+      const { [label]: _drop, ...rest } = r.qty;
+      return { ...r, qty: rest };
+    }));
+  };
   const sizeGrandTotal = form.size_breakdown.reduce((t, r) => t + sizeRowTotal(r), 0);
 
   const save = async () => {
@@ -366,16 +402,16 @@ export default function CostingEditor() {
               <Link href="/costing/products" style={{ fontSize: 13, color: "var(--accent)", paddingBottom: 8 }}>จัดการสินค้า →</Link>
             </div>
             <div className="form-grid form-grid-3">
-              <Field label="ประเภทสินค้า"><Sel value={form.product_category} onChange={(v) => set("product_category", v)} options={OPT.category} /></Field>
-              <Field label="ชนิดสินค้า"><Sel value={form.product_type} onChange={(v) => set("product_type", v)} options={OPT.type} /></Field>
-              <Field label="เพศ"><Sel value={form.gender} onChange={(v) => set("gender", v)} options={OPT.gender} /></Field>
-              <Field label="กลุ่มสินค้า"><Sel value={form.product_group} onChange={(v) => set("product_group", v)} options={OPT.group} /></Field>
-              <Field label="ประเภทผ้า"><Sel value={form.fabric_type} onChange={(v) => set("fabric_type", v)} options={OPT.fabricType} /></Field>
-              <Field label="ความยาว"><Sel value={form.length_type} onChange={(v) => set("length_type", v)} options={OPT.length} /></Field>
-              <Field label="คอ"><Sel value={form.neck} onChange={(v) => set("neck", v)} options={OPT.neck} /></Field>
-              <Field label="ปก"><Sel value={form.collar} onChange={(v) => set("collar", v)} options={OPT.collar} /></Field>
-              <Field label="Fit"><Sel value={form.fit} onChange={(v) => set("fit", v)} options={OPT.fit} /></Field>
-              <Field label="วิธีเปิด"><Sel value={form.opening} onChange={(v) => set("opening", v)} options={OPT.opening} /></Field>
+              <Field label="ประเภทสินค้า"><Combo value={form.product_category} onChange={(v) => set("product_category", v)} options={comboOpts.product_category} /></Field>
+              <Field label="ชนิดสินค้า"><Combo value={form.product_type} onChange={(v) => set("product_type", v)} options={comboOpts.product_type} /></Field>
+              <Field label="เพศ"><Combo value={form.gender} onChange={(v) => set("gender", v)} options={comboOpts.gender} /></Field>
+              <Field label="กลุ่มสินค้า"><Combo value={form.product_group} onChange={(v) => set("product_group", v)} options={comboOpts.product_group} /></Field>
+              <Field label="ประเภทผ้า"><Combo value={form.fabric_type} onChange={(v) => set("fabric_type", v)} options={comboOpts.fabric_type} /></Field>
+              <Field label="ความยาว"><Combo value={form.length_type} onChange={(v) => set("length_type", v)} options={comboOpts.length_type} /></Field>
+              <Field label="คอ"><Combo value={form.neck} onChange={(v) => set("neck", v)} options={comboOpts.neck} /></Field>
+              <Field label="ปก"><Combo value={form.collar} onChange={(v) => set("collar", v)} options={comboOpts.collar} /></Field>
+              <Field label="Fit"><Combo value={form.fit} onChange={(v) => set("fit", v)} options={comboOpts.fit} /></Field>
+              <Field label="วิธีเปิด"><Combo value={form.opening} onChange={(v) => set("opening", v)} options={comboOpts.opening} /></Field>
               <Field label="มีหมวก"><Sel value={form.has_hood} onChange={(v) => set("has_hood", v)} options={OPT.yesno} /></Field>
               <Field label="มีกระเป๋า"><Sel value={form.has_pocket} onChange={(v) => set("has_pocket", v)} options={OPT.yesno} /></Field>
             </div>
@@ -389,33 +425,74 @@ export default function CostingEditor() {
             </div>
 
             <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
                 <label className="form-label" style={{ margin: 0 }}>ตารางไซส์ (สี × จำนวน)</label>
-                <button className="small" style={{ padding: "4px 10px" }} onClick={addSizeRow}>+ เพิ่มสี</button>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <input value={newSize} onChange={(e) => setNewSize(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSizeCol(newSize); } }}
+                    placeholder="เพิ่มไซส์ เช่น XS, 2XL, 1" style={{ width: 160 }} />
+                  <button className="small" style={{ padding: "4px 10px" }} onClick={() => addSizeCol(newSize)}>+ ไซส์</button>
+                  <button className="small" style={{ padding: "4px 10px" }} onClick={addSizeRow}>+ เพิ่มสี</button>
+                </div>
               </div>
-              {form.size_breakdown.length > 0 && (
-                <div className="cost-line size" style={{ marginBottom: 4, fontSize: 12, color: "var(--text3)" }}>
-                  <span>สี</span><span style={{ textAlign: "right" }}>S</span><span style={{ textAlign: "right" }}>M</span>
-                  <span style={{ textAlign: "right" }}>L</span><span style={{ textAlign: "right" }}>XL</span>
-                  <span style={{ textAlign: "right" }}>รวม</span><span />
+
+              {form.size_labels.length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--text3)", padding: "6px 0" }}>ยังไม่มีคอลัมน์ไซส์ — เพิ่มไซส์ก่อน</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="size-table">
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left", minWidth: 110 }}>สี</th>
+                        {form.size_labels.map((L) => (
+                          <th key={L}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+                              {L}
+                              <button type="button" className="cl-x" title={`ลบไซส์ ${L}`}
+                                style={{ fontSize: 14 }} onClick={() => removeSizeCol(L)}>×</button>
+                            </span>
+                          </th>
+                        ))}
+                        <th style={{ textAlign: "right" }}>รวม</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {form.size_breakdown.map((r, i) => (
+                        <tr key={i}>
+                          <td><input value={r.color} onChange={(e) => updSizeColor(i, e.target.value)} placeholder="เช่น แดง" /></td>
+                          {form.size_labels.map((L) => (
+                            <td key={L}>
+                              <input className="num" inputMode="numeric" value={r.qty[L] ?? ""}
+                                onChange={(e) => updSizeCell(i, L, e.target.value)} placeholder="0" style={{ width: 54 }} />
+                            </td>
+                          ))}
+                          <td className="num" style={{ color: "var(--text2)" }}>{sizeRowTotal(r).toLocaleString()}</td>
+                          <td>
+                            <button className="cl-x" title="ลบแถว"
+                              onClick={() => set("size_breakdown", form.size_breakdown.filter((_, j) => j !== i))}>×</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-              {form.size_breakdown.map((r, i) => (
-                <div className="cost-line size" key={i}>
-                  <input value={r.color} onChange={(e) => updSizeRow(i, { color: e.target.value })} placeholder="เช่น แดง" />
-                  <input className="num" inputMode="numeric" value={r.s} onChange={(e) => updSizeRow(i, { s: e.target.value })} placeholder="0" />
-                  <input className="num" inputMode="numeric" value={r.m} onChange={(e) => updSizeRow(i, { m: e.target.value })} placeholder="0" />
-                  <input className="num" inputMode="numeric" value={r.l} onChange={(e) => updSizeRow(i, { l: e.target.value })} placeholder="0" />
-                  <input className="num" inputMode="numeric" value={r.xl} onChange={(e) => updSizeRow(i, { xl: e.target.value })} placeholder="0" />
-                  <span className="num" style={{ color: "var(--text2)" }}>{sizeRowTotal(r).toLocaleString()}</span>
-                  <button className="cl-x" title="ลบ" onClick={() => set("size_breakdown", form.size_breakdown.filter((_, j) => j !== i))}>×</button>
-                </div>
-              ))}
-              {form.size_breakdown.length > 0 && (
-                <div style={{ textAlign: "right", fontSize: 13, color: "var(--text2)", marginTop: 4 }}>
-                  รวมทั้งหมด <b style={{ fontFamily: "var(--mono)" }}>{sizeGrandTotal.toLocaleString()}</b> ตัว
-                </div>
-              )}
+
+              {form.size_breakdown.length > 0 && (() => {
+                // Live check that the size split adds up to the order total (non-blocking).
+                const diff = sizeGrandTotal - orderQty;
+                const matched = orderQty > 0 && diff === 0;
+                const color = matched ? "var(--green)" : orderQty > 0 ? "#d97706" : "var(--text2)";
+                return (
+                  <div style={{ textAlign: "right", fontSize: 13, color, marginTop: 4 }}>
+                    รวมไซส์ <b style={{ fontFamily: "var(--mono)" }}>{sizeGrandTotal.toLocaleString()}</b>
+                    {orderQty > 0
+                      ? <> / {orderQty.toLocaleString()} ตัว — {diff === 0 ? "พอดี" : diff < 0 ? `ขาด ${Math.abs(diff).toLocaleString()}` : `เกิน ${diff.toLocaleString()}`}</>
+                      : <> ตัว</>}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="form-grid form-grid-4" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginTop: 16 }}>

@@ -153,12 +153,47 @@ tr:hover td { background: var(--bg3); }
 .cost-line { display: grid; gap: 8px; align-items: center; margin-bottom: 8px; }
 .cost-line.fabric { grid-template-columns: 1.2fr 1.5fr 84px 104px 30px; }
 .cost-line.extra  { grid-template-columns: 1.6fr 120px 30px; }
-.cost-line.size   { grid-template-columns: 1.4fr repeat(4, 1fr) 72px 30px; }
+/* Size breakdown: a real table because the size columns are per-order dynamic
+   (added/removed at runtime), so a fixed CSS grid can't describe them. Compact,
+   borderless cells; the whole thing scrolls horizontally inside its card. */
+.size-table { width: auto; border-collapse: collapse; }
+.size-table th, .size-table td { border: none; padding: 3px 6px; white-space: nowrap; }
+.size-table th { font-size: 12px; font-weight: 500; color: var(--text3); text-align: center; text-transform: none; letter-spacing: normal; }
+.size-table tr:hover td { background: transparent; }
+.size-table td input { padding: 6px 8px; }
+.size-table .cl-x { background: transparent; border: none; color: var(--text3); font-size: 16px; padding: 0 2px; line-height: 1; }
+.size-table .cl-x:hover { color: var(--red); background: transparent; }
 .cost-line .cl-x  { background: transparent; border: none; color: var(--text3); font-size: 18px; padding: 0; line-height: 1; }
+
+/* Creatable "type-or-pick" dropdown (lib/combo) — a real dropdown list you can also
+   type a new value into. Used for the garment-spec fields in the costing section. */
+.combo .combo-caret {
+  position: absolute; right: 1px; top: 1px; bottom: 1px; width: 26px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--text3); font-size: 12px; padding: 0;
+}
+.combo .combo-caret:hover { background: transparent; color: var(--text2); }
+.combo-menu {
+  position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 240px; overflow-y: auto;
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .14); padding: 4px;
+}
+.combo-opt {
+  padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text);
+}
+.combo-opt:hover { background: var(--bg3); }
+.combo-opt.sel { background: var(--bg3); color: var(--accent); font-weight: 500; }
+.combo-add {
+  padding: 7px 10px; margin-top: 4px; border-top: 1px solid var(--border);
+  color: var(--accent); cursor: pointer; font-size: 13px; border-radius: 0 0 6px 6px;
+}
+.combo-add:hover { background: var(--bg3); }
+.combo-empty { padding: 7px 10px; color: var(--text3); font-size: 13px; }
 .cost-line .cl-x:hover { color: var(--red); background: transparent; }
 @media (max-width: 640px) {
   .cost-line.fabric, .cost-line.extra { grid-template-columns: 1fr 1fr; }
-  .cost-line.size { grid-template-columns: repeat(4, 1fr); }
   /* Scoped to the costing editor only — the dense attribute grids collapse to 2-up
      on phones. Existing modals (also form-grid-3) are untouched: they stay narrow
      inside their own max-width and never carry .costing-page. */

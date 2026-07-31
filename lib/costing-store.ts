@@ -54,6 +54,7 @@ import { getFabrics, getFabricLotMap } from "./fabric-store";
 //     color_count numeric not null default 0,
 //     size_count numeric not null default 0,
 //     shipment text not null default '',
+//     size_labels jsonb not null default '[]',   -- the order's size columns (labels)
 //     size_breakdown jsonb not null default '[]',
 //     embroidery_count numeric not null default 0,
 //     print_count numeric not null default 0,
@@ -91,7 +92,13 @@ export function statusMeta(key: string) {
   return ORDER_STATUSES.find((s) => s.key === key) ?? ORDER_STATUSES[0];
 }
 
-export type SizeRow = { color: string; s: number; m: number; l: number; xl: number };
+// Size breakdown. Sizes vary per job (XS S M L, or 1 2 3, or custom per customer —
+// see the guideline sheet), so each order defines its OWN set of size columns in
+// `size_labels`; each size row then carries a color plus a quantity keyed by label.
+// Stored as: size_labels jsonb (the columns) + size_breakdown jsonb (the rows). No
+// fixed size schema — new labels can be added freely without any migration.
+export const DEFAULT_SIZE_LABELS = ["S", "M", "L", "XL"];
+export type SizeRow = { color: string; qty: Record<string, number> };
 // A fabric used in the garment. `fabric_id` optionally links to a real ผ้า item so
 // price_per_yard can be auto-filled from live stock; it's still overridable by hand.
 export type FabricLine = { label: string; fabric_id: string | null; yard_per_pc: number; price_per_yard: number };
@@ -135,6 +142,7 @@ export type ProductCosting = {
   color_count: number;
   size_count: number;
   shipment: string;
+  size_labels: string[];
   size_breakdown: SizeRow[];
   embroidery_count: number;
   print_count: number;

@@ -22,6 +22,11 @@ export default function CostingImport() {
   };
 
   useEffect(() => {
+    // Excel import is disabled for now (no real import template yet, and the app is
+    // live). The page is kept intact but redirects back to the orders list. To
+    // re-enable, delete this redirect and un-comment the button in pages/costing/index.tsx.
+    router.replace("/costing"); return;
+    // eslint-disable-next-line no-unreachable
     const r = readRole();
     if (!r) { router.replace("/login"); return; }
     if (r !== "super") { router.replace("/"); return; }   // orders: super-admin only
@@ -146,7 +151,7 @@ export default function CostingImport() {
                     <td style={{ fontSize: 14, color: "var(--text2)" }}>{r.product_type || "—"}</td>
                     <td style={{ fontSize: 14, color: "var(--text2)" }}>
                       {r.size_breakdown.length > 0
-                        ? `${r.size_breakdown[0].color || "—"} (${r.size_breakdown[0].s}/${r.size_breakdown[0].m}/${r.size_breakdown[0].l}/${r.size_breakdown[0].xl})`
+                        ? `${r.size_breakdown[0].color || "—"} (${r.size_labels.map((L) => r.size_breakdown[0].qty[L] ?? 0).join("/")})`
                         : "—"}
                     </td>
                     <td className="num" style={{ fontFamily: "var(--mono)" }}>{r.order_qty.toLocaleString()}</td>

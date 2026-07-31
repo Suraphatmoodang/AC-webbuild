@@ -3,7 +3,8 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import { readRole, type Role } from "@/lib/auth";
 import { getProducts, addProduct, updateProduct, deleteProduct, emptyProductInput, productLabel, type Product, type ProductInput } from "@/lib/product-store";
-import { PRODUCT_OPT } from "@/lib/product-spec";
+import { PRODUCT_OPT, buildComboOptions } from "@/lib/product-spec";
+import { Combo } from "@/lib/combo";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 
@@ -61,6 +62,9 @@ export default function ProductsPage() {
   }, [rows, query]);
 
   const { page, setPage, totalPages, pageItems, rangeStart, rangeEnd, total } = usePagination(filtered, query);
+
+  // Type-or-pick options: presets + every distinct value already saved in the catalog.
+  const comboOpts = useMemo(() => buildComboOptions(rows), [rows]);
 
   const openAdd = () => { setEditing(null); setForm(emptyProductInput()); };
   const openEdit = (p: Product) => {
@@ -174,21 +178,21 @@ export default function ProductsPage() {
               <div className="form-grid form-grid-3">
                 <Field label="Style no."><input value={form.style_no} onChange={(e) => set("style_no", e.target.value)} /></Field>
                 <Field label="ยี่ห้อ"><input value={form.brand} onChange={(e) => set("brand", e.target.value)} /></Field>
-                <Field label="ประเภทสินค้า"><Sel value={form.product_category} onChange={(v) => set("product_category", v)} options={PRODUCT_OPT.category} /></Field>
+                <Field label="ประเภทสินค้า"><Combo value={form.product_category} onChange={(v) => set("product_category", v)} options={comboOpts.product_category} /></Field>
               </div>
               <div style={{ marginTop: 12 }}>
                 <Field label="รายละเอียด"><input value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
               </div>
               <div className="form-grid form-grid-3" style={{ marginTop: 12 }}>
-                <Field label="ชนิดสินค้า"><Sel value={form.product_type} onChange={(v) => set("product_type", v)} options={PRODUCT_OPT.type} /></Field>
-                <Field label="เพศ"><Sel value={form.gender} onChange={(v) => set("gender", v)} options={PRODUCT_OPT.gender} /></Field>
-                <Field label="กลุ่มสินค้า"><Sel value={form.product_group} onChange={(v) => set("product_group", v)} options={PRODUCT_OPT.group} /></Field>
-                <Field label="ประเภทผ้า"><Sel value={form.fabric_type} onChange={(v) => set("fabric_type", v)} options={PRODUCT_OPT.fabricType} /></Field>
-                <Field label="ความยาว"><Sel value={form.length_type} onChange={(v) => set("length_type", v)} options={PRODUCT_OPT.length} /></Field>
-                <Field label="คอ"><Sel value={form.neck} onChange={(v) => set("neck", v)} options={PRODUCT_OPT.neck} /></Field>
-                <Field label="ปก"><Sel value={form.collar} onChange={(v) => set("collar", v)} options={PRODUCT_OPT.collar} /></Field>
-                <Field label="Fit"><Sel value={form.fit} onChange={(v) => set("fit", v)} options={PRODUCT_OPT.fit} /></Field>
-                <Field label="วิธีเปิด"><Sel value={form.opening} onChange={(v) => set("opening", v)} options={PRODUCT_OPT.opening} /></Field>
+                <Field label="ชนิดสินค้า"><Combo value={form.product_type} onChange={(v) => set("product_type", v)} options={comboOpts.product_type} /></Field>
+                <Field label="เพศ"><Combo value={form.gender} onChange={(v) => set("gender", v)} options={comboOpts.gender} /></Field>
+                <Field label="กลุ่มสินค้า"><Combo value={form.product_group} onChange={(v) => set("product_group", v)} options={comboOpts.product_group} /></Field>
+                <Field label="ประเภทผ้า"><Combo value={form.fabric_type} onChange={(v) => set("fabric_type", v)} options={comboOpts.fabric_type} /></Field>
+                <Field label="ความยาว"><Combo value={form.length_type} onChange={(v) => set("length_type", v)} options={comboOpts.length_type} /></Field>
+                <Field label="คอ"><Combo value={form.neck} onChange={(v) => set("neck", v)} options={comboOpts.neck} /></Field>
+                <Field label="ปก"><Combo value={form.collar} onChange={(v) => set("collar", v)} options={comboOpts.collar} /></Field>
+                <Field label="Fit"><Combo value={form.fit} onChange={(v) => set("fit", v)} options={comboOpts.fit} /></Field>
+                <Field label="วิธีเปิด"><Combo value={form.opening} onChange={(v) => set("opening", v)} options={comboOpts.opening} /></Field>
                 <Field label="มีหมวก"><Sel value={form.has_hood} onChange={(v) => set("has_hood", v)} options={PRODUCT_OPT.yesno} /></Field>
                 <Field label="มีกระเป๋า"><Sel value={form.has_pocket} onChange={(v) => set("has_pocket", v)} options={PRODUCT_OPT.yesno} /></Field>
               </div>

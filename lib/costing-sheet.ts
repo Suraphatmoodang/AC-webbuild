@@ -11,7 +11,7 @@
 // size-breakdown entry on that order; multi-colour orders (one colour per row) are not
 // merged here — that's fine for a first import and can be grouped later.
 
-import type { CostingInput, SizeRow } from "./costing-store";
+import { DEFAULT_SIZE_LABELS, type CostingInput, type SizeRow } from "./costing-store";
 
 export type CostingSheetRow = {
   release_no: string;
@@ -39,6 +39,7 @@ export type CostingSheetRow = {
   color_count: number;
   size_count: number;
   shipment: string;
+  size_labels: string[];
   size_breakdown: SizeRow[];
   embroidery_count: number;
   print_count: number;
@@ -147,7 +148,9 @@ export function parseCostingSheet(raw: any[][]): { rows: CostingSheetRow[]; cols
     .map((r): CostingSheetRow => {
       const color = str(g(r, "size_color"));
       const s = num(g(r, "size_s")), m = num(g(r, "size_m")), l = num(g(r, "size_l")), xl = num(g(r, "size_xl"));
-      const size_breakdown: SizeRow[] = (color || s || m || l || xl) ? [{ color, s, m, l, xl }] : [];
+      // The sheet's size columns are S/M/L/XL; each order can add more later in the editor.
+      const size_breakdown: SizeRow[] = (color || s || m || l || xl)
+        ? [{ color, qty: { S: s, M: m, L: l, XL: xl } }] : [];
       return {
         release_no: str(g(r, "release_no")),
         release_date: dateStr(g(r, "release_date")),
@@ -174,6 +177,7 @@ export function parseCostingSheet(raw: any[][]): { rows: CostingSheetRow[]; cols
         color_count: num(g(r, "color_count")),
         size_count: num(g(r, "size_count")),
         shipment: str(g(r, "shipment")),
+        size_labels: [...DEFAULT_SIZE_LABELS],
         size_breakdown,
         embroidery_count: num(g(r, "embroidery_count")),
         print_count: num(g(r, "print_count")),

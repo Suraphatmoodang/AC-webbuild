@@ -125,7 +125,10 @@ export default function CostingList() {
         <div style={{ display: "flex", gap: 8 }}>
           {/* Trends button hidden for now (page kept at /costing/trends):
           <Link href="/costing/trends"><button>📈 แนวโน้ม</button></Link> */}
-          <Link href="/costing/import"><button>นำเข้า Excel</button></Link>
+          {/* Excel import hidden for now — no real import template yet, and this is live
+              so we don't want anyone importing example data. Page kept at /costing/import,
+              but it redirects back until re-enabled here.
+          <Link href="/costing/import"><button>นำเข้า Excel</button></Link> */}
           <Link href="/costing/new"><button className="primary">+ เพิ่มออเดอร์</button></Link>
         </div>
       </div>
