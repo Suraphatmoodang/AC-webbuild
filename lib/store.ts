@@ -668,20 +668,39 @@ export async function approveImports(
 
 // Build a map of "type|acc_code|color|size" → matching existing accessories,
 // so the review page can both flag duplicates and show them for comparison.
+// Extra dedupe axis for the import-review page ONLY: customer + supplier name.
+// The updater's C/D keys deliberately omit these (so it can backfill customer),
+// but for duplicate DETECTION at import time the user wants the same item bought
+// for a different customer, or from a different supplier, treated as distinct.
+const importDupExtraKey = (customer: string, supplierName: string): string =>
+  `|C=${normalizeForMatch(customer)}|S=${normalizeForMatch(supplierName)}`;
+
+// A staged import row's import-review duplicate key: the updater's C/D key plus
+// the customer + supplier axis. Existing items are indexed the same way below.
+export function importDupKeyForRow(
+  r: { type: string; acc_code: string; description: string; color: string; size: string; customer: string; supplier_name: string }
+): string {
+  return matchKeyForRow(r) + importDupExtraKey(r.customer, r.supplier_name);
+}
+
+// Duplicate lookup for the import-review page. Existing items are keyed by the
+// full C-key (type|acc_code|description|color|size) and a code-less D-key, both
+// whitespace-normalized — the SAME base keys the bulk updater uses — PLUS the
+// customer + supplier axis (see importDupExtraKey). Description is essential:
+// without it every same-type/color/size item without a code collides as a false
+// duplicate. Look a staged row up with importDupKeyForRow(r).
 export async function getDuplicateMap(): Promise<Map<string, Accessory[]>> {
+  const [accs, sups] = await Promise.all([getAccessories(), getSuppliers()]);
+  const supName = new Map(sups.map((s) => [s.id, s.supplier_name]));
   const map = new Map<string, Accessory[]>();
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from("accessories").select("*").order("id").range(from, from + PAGE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    for (const a of data as Accessory[]) {
-      const key = `${a.type}|${a.acc_code}|${a.color}|${a.size}`;
+  for (const a of accs) {
+    const extra = importDupExtraKey(a.customer ?? "", a.supplier_id ? (supName.get(a.supplier_id) ?? "") : "");
+    for (const k of accessoryIndexKeys(a)) {
+      const key = k + extra;
       const arr = map.get(key) ?? [];
       arr.push(a);
       map.set(key, arr);
     }
-    if (data.length < PAGE) break;
   }
   return map;
 }

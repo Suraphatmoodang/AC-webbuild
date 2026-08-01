@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getPendingImports, approveImports, rejectImports, getDuplicateMap, getSuppliers, updateImportRow,
-  type ImportRow, type Accessory, type Supplier } from "@/lib/store";
+  importDupKeyForRow, type ImportRow, type Accessory, type Supplier } from "@/lib/store";
 import { useRequireAccess } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
@@ -14,8 +14,9 @@ export default function ImportReviewPage() {
   const [dupMap, setDupMap] = useState<Map<string, Accessory[]>>(new Map());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // For duplicate rows the admin resolves: id → "new" (overwrite existing) or "old" (keep existing)
-  const [resolutions, setResolutions] = useState<Record<string, "new" | "old">>({});
+  // For duplicate rows the admin resolves: id → "new" (overwrite existing),
+  // "old" (keep existing, skip), or "add" (force-insert as a brand-new item).
+  const [resolutions, setResolutions] = useState<Record<string, "new" | "old" | "add">>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -48,9 +49,11 @@ export default function ImportReviewPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const keyOf = (r: { type: string; acc_code: string; color: string; size: string }) =>
-    `${r.type}|${r.acc_code}|${r.color}|${r.size}`;
-  const matchesFor = (r: ImportRow) => dupMap.get(keyOf(r)) ?? [];
+  // Match a staged row against existing items. Uses the bulk updater's base key
+  // (type|acc_code|description|color|size, whitespace-normalized, code-less rows
+  // reach coded items via the D-key) PLUS the customer + supplier axis, so an
+  // item for a different customer or supplier is treated as distinct here.
+  const matchesFor = (r: ImportRow) => dupMap.get(importDupKeyForRow(r)) ?? [];
   const dupCount = (r: ImportRow) => matchesFor(r).length;
   const isDup = (r: ImportRow) => dupCount(r) > 0;
   const isMultiDup = (r: ImportRow) => dupCount(r) > 1;
@@ -73,7 +76,7 @@ export default function ImportReviewPage() {
     next.has(id) ? next.delete(id) : next.add(id);
     setSelected(next);
   };
-  const setRes = (id: string, val: "new" | "old") => setResolutions((p) => ({ ...p, [id]: val }));
+  const setRes = (id: string, val: "new" | "old" | "add") => setResolutions((p) => ({ ...p, [id]: val }));
 
   // Select-all skips duplicates entirely (only non-duplicate valid rows)
   const pageSelectableIds = pageRows.filter((r) => isValid(r) && !isDup(r)).map((r) => r.id);
@@ -88,13 +91,16 @@ export default function ImportReviewPage() {
   // What will happen on approve:
   //  - selected non-duplicates → insert new
   //  - duplicates resolved "new" (single match only) → overwrite that match
+  //  - duplicates resolved "add" → insert as a brand-new item (kept separate)
   //  - duplicates resolved "old" or unresolved → skipped
   const buildApprovalList = () => {
     const list: (ImportRow & { overwriteId?: string })[] = [];
     for (const r of rows) {
       if (!isValid(r)) continue;
       if (isDup(r)) {
-        if (resolutions[r.id] === "new" && !isMultiDup(r)) {
+        if (resolutions[r.id] === "add") {
+          list.push(r); // force-insert despite the possible-duplicate flag
+        } else if (resolutions[r.id] === "new" && !isMultiDup(r)) {
           list.push({ ...r, overwriteId: matchesFor(r)[0].id });
         }
         // "old" or unresolved or multi-match → skip
@@ -106,7 +112,8 @@ export default function ImportReviewPage() {
   };
 
   const overwriteCount = rows.filter((r) => isValid(r) && isDup(r) && resolutions[r.id] === "new" && !isMultiDup(r)).length;
-  const newCount = rows.filter((r) => isValid(r) && !isDup(r) && selected.has(r.id)).length;
+  const addNewCount = rows.filter((r) => isValid(r) && isDup(r) && resolutions[r.id] === "add").length;
+  const newCount = rows.filter((r) => isValid(r) && !isDup(r) && selected.has(r.id)).length + addNewCount;
 
   const doApprove = async () => {
     const list = buildApprovalList();
@@ -246,7 +253,7 @@ export default function ImportReviewPage() {
                   const res = resolutions[r.id];
                   return (
                     <tr key={r.id}
-                      style={{ opacity: valid ? 1 : 0.5, background: (checked || res === "new") ? "var(--bg4)" : undefined }}>
+                      style={{ opacity: valid ? 1 : 0.5, background: (checked || res === "new" || res === "add") ? "var(--bg4)" : undefined }}>
                       <td style={{ textAlign: "center" }}>
                         {!dup && (
                           <input type="checkbox" checked={checked} disabled={!valid}
@@ -286,6 +293,10 @@ export default function ImportReviewPage() {
                                   onClick={() => setRes(r.id, "old")}>คงเดิม</button>
                               </>
                             )}
+                            <button style={{ padding: "3px 6px", fontSize: 13, whiteSpace: "nowrap",
+                              ...(res === "add" ? { background: "var(--green)", color: "#0f0f0f", borderColor: "var(--green)" } : { color: "var(--green)", borderColor: "var(--green)" }) }}
+                              title="เพิ่มเป็นรายการใหม่ แม้ระบบจะมองว่าอาจซ้ำ"
+                              onClick={() => setRes(r.id, "add")}>เพิ่มใหม่</button>
                           </>
                         )}
                         </div>
@@ -301,8 +312,9 @@ export default function ImportReviewPage() {
       </div>
 
       <p style={{ marginTop: 12, fontSize: 14, color: "var(--text3)" }}>
-        "เลือกทั้งหมด" จะเลือกเฉพาะรายการใหม่ (ข้ามรายการซ้ำ) · รายการซ้ำเลือก "ทับใหม่" เพื่อเขียนทับข้อมูลเดิม หรือ "คงเดิม" เพื่อข้าม ·
-        รายการที่ซ้ำหลายรายการต้องจัดการเองในหน้าจัดการ · กด "เทียบ" เพื่อดูความต่าง · คลิกแถวเพื่อดูข้อมูลทั้งหมด
+        "เลือกทั้งหมด" จะเลือกเฉพาะรายการใหม่ (ข้ามรายการซ้ำ) · รายการซ้ำเลือก "ทับใหม่" เพื่อเขียนทับข้อมูลเดิม, "คงเดิม" เพื่อข้าม
+        หรือ "เพิ่มใหม่" เพื่อเพิ่มเป็นรายการใหม่แม้จะมองว่าอาจซ้ำ · การจับคู่พิจารณา ประเภท/รหัส/รายละเอียด/สี/ขนาด รวมถึงลูกค้าและซัพพลายเออร์ ·
+        กด "เทียบ" เพื่อดูความต่าง · คลิกแถวเพื่อดูข้อมูลทั้งหมด
       </p>
 
       {/* Full detail modal */}
@@ -402,6 +414,12 @@ export default function ImportReviewPage() {
                 ))}
               </div>
               <div className="modal-footer">
+                <button
+                  style={{ background: "var(--green)", color: "#0f0f0f", borderColor: "var(--green)", marginRight: "auto" }}
+                  title="เพิ่มรายการนี้เข้าระบบเป็นรายการใหม่ แม้ระบบจะมองว่าอาจซ้ำ"
+                  onClick={() => { setRes(compareRow.id, "add"); setCompareRow(null); }}>
+                  + เพิ่มเป็นรายการใหม่
+                </button>
                 <button className="primary" onClick={() => setCompareRow(null)}>ปิด</button>
               </div>
             </div>
