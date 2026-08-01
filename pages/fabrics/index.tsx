@@ -32,8 +32,9 @@ export default function FabricStockPage() {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
   const [showLow, setShowLow] = useState(false);
-  // Ownership filter: "" = all, "ours" = only ours (no owner), "external" = only consignment
-  const [ownFilter, setOwnFilter] = useState<"" | "ours" | "external">("");
+  // Ownership filter: "" = all, "ours" = only ours (no owner), "external" = any
+  // consignment stock, or "o:<name>" = one specific owner factory.
+  const [ownFilter, setOwnFilter] = useState<string>("");
   const [viewItem, setViewItem] = useState<Fabric | null>(null);
   // Public page — the session only decides whether the "edit in manage" shortcut
   // shows, and only a fabric-side admin can follow it.
@@ -83,6 +84,7 @@ export default function FabricStockPage() {
     if (filterType && i.fabric_type !== filterType) return false;
     if (ownFilter === "ours" && isExternal(i)) return false;
     if (ownFilter === "external" && !isExternal(i)) return false;
+    if (ownFilter.startsWith("o:") && i.owner !== ownFilter.slice(2)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -179,17 +181,20 @@ export default function FabricStockPage() {
           <option value="">ทุกชนิดผ้า</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
+        <select value={ownFilter} onChange={(e) => setOwnFilter(e.target.value)} style={{ width: "auto", minWidth: 150 }}>
+          <option value="">ทุกเจ้าของ</option>
+          <option value="ours">{`เฉพาะ ${SELF_OWNER}`}</option>
+          {owners.length > 0 && <option value="external">เฉพาะฝากเก็บ (โรงงานอื่น)</option>}
+          {owners.length > 0 && (
+            <optgroup label="เจ้าของเฉพาะราย">
+              {owners.map((o) => <option key={o} value={`o:${o}`}>{o}</option>)}
+            </optgroup>
+          )}
+        </select>
         <button onClick={() => setShowLow(!showLow)}
           style={{ whiteSpace: "nowrap", ...(showLow ? { background: "#2b6fd4", borderColor: "var(--accent)", color: "var(--text)" } : {}) }}>
           ⚠ สต็อคต่ำ
         </button>
-        {(owners.length > 0 || ownFilter !== "") && (
-          <select value={ownFilter} onChange={(e) => setOwnFilter(e.target.value as "" | "ours" | "external")} style={{ width: "auto", minWidth: 150 }}>
-            <option value="">ทุกเจ้าของ</option>
-            <option value="ours">{`เฉพาะ ${SELF_OWNER}`}</option>
-            <option value="external">เฉพาะฝากเก็บ (โรงงานอื่น)</option>
-          </select>
-        )}
         <button onClick={handleExport} disabled={exporting}
           style={{ whiteSpace: "nowrap", background: "var(--green)", borderColor: "var(--green)", color: "#fff", fontWeight: 500 }}>
           {exporting ? "กำลังส่งออก…" : "⬇ ส่งออก Excel"}

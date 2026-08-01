@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import { getPendingFabricImports, approveFabricImports, rejectFabricImports, getFabricDuplicateMap,
-  getSuppliers, updateFabricImportRow, SELF_OWNER,
+  getSuppliers, updateFabricImportRow, SELF_OWNER, fabricImportDupKeyForRow,
   type FabricImportRow, type Fabric, type Supplier } from "@/lib/fabric-store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
@@ -17,8 +17,9 @@ export default function FabricImportReviewPage() {
   const [dupMap, setDupMap] = useState<Map<string, Fabric[]>>(new Map());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // For duplicate rows the admin resolves: id → "new" (overwrite existing) or "old" (keep existing)
-  const [resolutions, setResolutions] = useState<Record<string, "new" | "old">>({});
+  // For duplicate rows the admin resolves: id → "new" (overwrite existing),
+  // "old" (keep existing, skip), or "add" (force-insert as a brand-new item).
+  const [resolutions, setResolutions] = useState<Record<string, "new" | "old" | "add">>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -51,9 +52,11 @@ export default function FabricImportReviewPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const keyOf = (r: { fabric_type: string; fabric_code: string; color: string; width: string }) =>
-    `${r.fabric_type}|${r.fabric_code}|${r.color}|${r.width}`;
-  const matchesFor = (r: FabricImportRow) => dupMap.get(keyOf(r)) ?? [];
+  // Match a staged row against existing fabrics. Uses the bulk updater's base key
+  // (type|code|color|width, with construction in the code-less D-key, whitespace-
+  // normalized, code-less rows reach coded items) PLUS the owner + supplier axis,
+  // so a fabric owned by a different factory or supplier is treated as distinct.
+  const matchesFor = (r: FabricImportRow) => dupMap.get(fabricImportDupKeyForRow(r)) ?? [];
   const dupCount = (r: FabricImportRow) => matchesFor(r).length;
   const isDup = (r: FabricImportRow) => dupCount(r) > 0;
   const isMultiDup = (r: FabricImportRow) => dupCount(r) > 1;
@@ -83,7 +86,7 @@ export default function FabricImportReviewPage() {
     next.has(id) ? next.delete(id) : next.add(id);
     setSelected(next);
   };
-  const setRes = (id: string, val: "new" | "old") => setResolutions((p) => ({ ...p, [id]: val }));
+  const setRes = (id: string, val: "new" | "old" | "add") => setResolutions((p) => ({ ...p, [id]: val }));
 
   // Select-all skips duplicates entirely (only non-duplicate valid rows)
   const pageSelectableIds = pageRows.filter((r) => isValid(r) && !isDup(r)).map((r) => r.id);
@@ -98,13 +101,16 @@ export default function FabricImportReviewPage() {
   // What will happen on approve:
   //  - selected non-duplicates → insert new
   //  - duplicates resolved "new" (single match only) → overwrite that match
+  //  - duplicates resolved "add" → insert as a brand-new item (kept separate)
   //  - duplicates resolved "old" or unresolved → skipped
   const buildApprovalList = () => {
     const list: (FabricImportRow & { overwriteId?: string })[] = [];
     for (const r of rows) {
       if (!isValid(r)) continue;
       if (isDup(r)) {
-        if (resolutions[r.id] === "new" && !isMultiDup(r)) {
+        if (resolutions[r.id] === "add") {
+          list.push(r); // force-insert despite the possible-duplicate flag
+        } else if (resolutions[r.id] === "new" && !isMultiDup(r)) {
           list.push({ ...r, overwriteId: matchesFor(r)[0].id });
         }
       } else if (selected.has(r.id)) {
@@ -115,7 +121,8 @@ export default function FabricImportReviewPage() {
   };
 
   const overwriteCount = rows.filter((r) => isValid(r) && isDup(r) && resolutions[r.id] === "new" && !isMultiDup(r)).length;
-  const newCount = rows.filter((r) => isValid(r) && !isDup(r) && selected.has(r.id)).length;
+  const addNewCount = rows.filter((r) => isValid(r) && isDup(r) && resolutions[r.id] === "add").length;
+  const newCount = rows.filter((r) => isValid(r) && !isDup(r) && selected.has(r.id)).length + addNewCount;
 
   const doApprove = async () => {
     const list = buildApprovalList();
@@ -252,7 +259,7 @@ export default function FabricImportReviewPage() {
                   const res = resolutions[r.id];
                   return (
                     <tr key={r.id}
-                      style={{ opacity: valid ? 1 : 0.5, background: (checked || res === "new") ? "var(--bg4)" : undefined }}>
+                      style={{ opacity: valid ? 1 : 0.5, background: (checked || res === "new" || res === "add") ? "var(--bg4)" : undefined }}>
                       <td style={{ textAlign: "center" }}>
                         {!dup && (
                           <input type="checkbox" checked={checked} disabled={!valid}
@@ -292,6 +299,10 @@ export default function FabricImportReviewPage() {
                                   onClick={() => setRes(r.id, "old")}>คงเดิม</button>
                               </>
                             )}
+                            <button style={{ padding: "3px 6px", fontSize: 13, whiteSpace: "nowrap",
+                              ...(res === "add" ? { background: "var(--green)", color: "#0f0f0f", borderColor: "var(--green)" } : { color: "var(--green)", borderColor: "var(--green)" }) }}
+                              title="เพิ่มเป็นรายการใหม่ แม้ระบบจะมองว่าอาจซ้ำ"
+                              onClick={() => setRes(r.id, "add")}>เพิ่มใหม่</button>
                           </>
                         )}
                         </div>
@@ -307,8 +318,9 @@ export default function FabricImportReviewPage() {
       </div>
 
       <p style={{ marginTop: 12, fontSize: 14, color: "var(--text3)" }}>
-        "เลือกทั้งหมด" จะเลือกเฉพาะรายการใหม่ (ข้ามรายการซ้ำ) · รายการซ้ำเลือก "ทับใหม่" เพื่อเขียนทับข้อมูลเดิม หรือ "คงเดิม" เพื่อข้าม ·
-        ตรวจซ้ำจาก ชนิดผ้า + เลขที่ + สี + หน้าผ้า · กด "เทียบ" เพื่อดูความต่าง · คลิกแถวเพื่อดูข้อมูลทั้งหมด
+        "เลือกทั้งหมด" จะเลือกเฉพาะรายการใหม่ (ข้ามรายการซ้ำ) · รายการซ้ำเลือก "ทับใหม่" เพื่อเขียนทับข้อมูลเดิม, "คงเดิม" เพื่อข้าม
+        หรือ "เพิ่มใหม่" เพื่อเพิ่มเป็นรายการใหม่แม้จะมองว่าอาจซ้ำ · ตรวจซ้ำจาก ชนิดผ้า + เลขที่ + โครงสร้าง + สี + หน้าผ้า รวมถึงเจ้าของและซัพพลายเออร์ ·
+        กด "เทียบ" เพื่อดูความต่าง · คลิกแถวเพื่อดูข้อมูลทั้งหมด
       </p>
 
       {/* Full detail modal */}
@@ -414,6 +426,12 @@ export default function FabricImportReviewPage() {
                 ))}
               </div>
               <div className="modal-footer">
+                <button
+                  style={{ background: "var(--green)", color: "#0f0f0f", borderColor: "var(--green)", marginRight: "auto" }}
+                  title="เพิ่มรายการนี้เข้าระบบเป็นรายการใหม่ แม้ระบบจะมองว่าอาจซ้ำ"
+                  onClick={() => { setRes(compareRow.id, "add"); setCompareRow(null); }}>
+                  + เพิ่มเป็นรายการใหม่
+                </button>
                 <button className="primary" onClick={() => setCompareRow(null)}>ปิด</button>
               </div>
             </div>

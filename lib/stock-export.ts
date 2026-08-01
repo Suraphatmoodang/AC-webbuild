@@ -4,7 +4,10 @@
 //
 // Layouts are taken verbatim from the reference sheets the user provided:
 //   · Accessories — "สต็อคป้ายไซส์…"  (22 columns; includes ขั้นต่ำ)
-//   · Fabrics     — "Fabric Stock…"   (24 columns; NO ขั้นต่ำ, NO เจ้าของ)
+//   · Fabrics     — "Fabric Stock…"   (24 columns; NO ขั้นต่ำ) + เจ้าของ (owner)
+// The owner (เจ้าของ) column is exported RAW: blank means our own stock, so a blank
+// cell round-trips back as ours. Never write "AC" here — the importer would then tag
+// the row as external consignment stock (a non-blank owner).
 //
 // COMPLETENESS: every table is paged through in full, ordered by the unique `id`.
 // (Ordering by a non-unique column like `type`/`effective_date` across .range()
@@ -121,7 +124,7 @@ export async function exportAccessoriesXlsx(): Promise<number> {
 // a re-uploaded export back to the exact rows. Importer ignores it, so round-trip is safe.
 const FAB_HEADER: string[] = [
   "ชนิดผ้า", "เส้นใย (Composition)", "โครงสร้าง (Construction)", "สี", "หน้าผ้า",
-  "น้ำหนัก", "หน่วย", "แถว", "เลขที่", "สต็อคคงเหลือ", "หน่วย", "ราคาต่อหน่วย", "หน่วย",
+  "น้ำหนัก", "หน่วย", "แถว", "เลขที่", "สต็อคคงเหลือ", "หน่วย", "ราคาต่อหน่วย", "หน่วย", "เจ้าของ",
   "ชื่อบริษัทซัพ", "ผู้ติดต่อ", "เบอร์ติดต่อ", "อีเมล", "ที่อยู่", "จังหวัด", "ประเทศ",
   "รหัสไปรษณีย์", "ระยะเวลาส่ง(วัน)", "เทอมจ่ายเงิน", "เลขผู้เสียภาษี", "id",
 ];
@@ -137,7 +140,7 @@ export async function exportFabricsXlsx(): Promise<number> {
   const rows = items.map((f): (string | number)[] => [
     f.fabric_type, f.composition, f.construction, f.color, f.width,
     Number(f.weight) || 0, f.weight_unit, f.row_label, f.fabric_code,
-    stockMap.get(f.id) ?? 0, f.unit, Number(f.unit_cost) || 0, f.cost_unit,
+    stockMap.get(f.id) ?? 0, f.unit, Number(f.unit_cost) || 0, f.cost_unit, f.owner ?? "",
     ...supplierCells(f.supplier_id ? supMap.get(f.supplier_id) : undefined),
     f.id,
   ]);

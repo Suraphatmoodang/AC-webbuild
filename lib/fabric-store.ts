@@ -648,20 +648,42 @@ export async function approveFabricImports(
 
 // Build a map of "fabric_type|fabric_code|color|width" → matching existing fabrics,
 // so the review page can both flag duplicates and show them for comparison.
+// Extra dedupe axis for the fabric import-review page ONLY: owner + supplier name.
+// Mirrors the accessory side's customer + supplier axis (owner plays the customer
+// role for fabrics). The updater's C/D keys deliberately omit owner (so it can tag
+// older rows as consignment stock), but for duplicate DETECTION at import time the
+// user wants the same fabric owned by a different factory, or from a different
+// supplier, treated as distinct. Blank owner is our own stock (SELF_OWNER = "AC"),
+// so blank and "AC" unify here.
+const importDupExtraKey = (owner: string, supplierName: string): string =>
+  `|O=${normalizeForMatch(owner) || SELF_OWNER}|S=${normalizeForMatch(supplierName)}`;
+
+// A staged fabric import row's import-review duplicate key: the updater's C/D key
+// plus the owner + supplier axis. Existing fabrics are indexed the same way below.
+export function fabricImportDupKeyForRow(
+  r: { fabric_type: string; fabric_code: string; construction: string; color: string; width: string; owner: string; supplier_name: string }
+): string {
+  return fabricMatchKeyForRow(r) + importDupExtraKey(r.owner, r.supplier_name);
+}
+
+// Duplicate lookup for the fabric import-review page. Existing fabrics are keyed by
+// the full C-key (type|code|color|width) and a code-less D-key that uses การทอ
+// (construction), both whitespace-normalized — the SAME base keys the bulk updater
+// uses — PLUS the owner + supplier axis (see importDupExtraKey). Using construction
+// in the D-key is essential: without it every same-type/color/width fabric without a
+// code collides as a false duplicate. Look a staged row up with fabricImportDupKeyForRow(r).
 export async function getFabricDuplicateMap(): Promise<Map<string, Fabric[]>> {
+  const [fabs, sups] = await Promise.all([getFabrics(), getSuppliers()]);
+  const supName = new Map(sups.map((s) => [s.id, s.supplier_name]));
   const map = new Map<string, Fabric[]>();
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from("fabrics").select("*").order("id").range(from, from + PAGE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    for (const f of data as Fabric[]) {
-      const key = `${f.fabric_type}|${f.fabric_code}|${f.color}|${f.width}`;
+  for (const f of fabs) {
+    const extra = importDupExtraKey(f.owner ?? "", f.supplier_id ? (supName.get(f.supplier_id) ?? "") : "");
+    for (const k of fabricIndexKeys(f)) {
+      const key = k + extra;
       const arr = map.get(key) ?? [];
       arr.push(f);
       map.set(key, arr);
     }
-    if (data.length < PAGE) break;
   }
   return map;
 }
