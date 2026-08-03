@@ -225,6 +225,29 @@ export async function getTransactions(): Promise<Transaction[]> {
   return all;
 }
 
+// Distinct non-empty recorder names (created_by) seen in transaction history, for
+// the ผู้บันทึก dropdown on the transactions page. Selects only the one column so it
+// stays cheap even with a large history.
+export async function getRecorders(): Promise<string[]> {
+  const set = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("accessory_transactions")
+      .select("created_by")
+      .order("id", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    for (const r of data as { created_by: string }[]) {
+      const n = (r.created_by ?? "").trim();
+      if (n) set.add(n);
+    }
+    if (data.length < PAGE) break;
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "th"));
+}
+
 export async function getTransactionsByAccessory(accessory_id: string): Promise<Transaction[]> {
   const { data, error } = await supabase
     .from("accessory_transactions")

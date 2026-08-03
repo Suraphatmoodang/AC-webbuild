@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import { getFabrics, addFabricTransaction, revertFabricTransaction, getFabricTransactionsByFabric,
-  getFabricLotMap, stockFromLots, valueFromLots,
+  getFabricLotMap, getRecorders, stockFromLots, valueFromLots,
   type Fabric, type FabricLot, type FabricTransaction } from "@/lib/fabric-store";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
@@ -31,24 +31,25 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
 }
 
 // Who recorded the transaction (ผู้บันทึก). Defaults to the usual person on this
-// side, but the field is free text — anyone else can simply be typed in. RECORDERS
-// only supplies the dropdown suggestions; add names here as the roster grows.
-// The chosen name PERSISTS across consecutive entries (the post-save reset
-// deliberately leaves `by` alone), so a long recording session isn't retyped.
-const RECORDERS = ["กระแต"];
+// side, but the field is free text — anyone else can simply be typed in. The
+// dropdown suggestions are the default name plus every distinct recorder already
+// seen in fabric transaction history (loaded via getRecorders), so the roster grows
+// on its own. The chosen name PERSISTS across consecutive entries (the post-save
+// reset deliberately leaves `by` alone), so a long recording session isn't retyped.
+const DEFAULT_RECORDER = "กระแต";
 
-function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function RecordedByField({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
   return (
     <>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         list="fab-recorders"
-        placeholder={RECORDERS[0]}
+        placeholder={DEFAULT_RECORDER}
         autoComplete="off"
       />
       <datalist id="fab-recorders">
-        {RECORDERS.map((r) => <option key={r} value={r} />)}
+        {options.map((r) => <option key={r} value={r} />)}
       </datalist>
     </>
   );
@@ -71,7 +72,8 @@ export default function FabricTransactionsPage() {
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split("T")[0]);
   const [refNo, setRefNo] = useState("");
   const [note, setNote] = useState("");
-  const [by, setBy] = useState(RECORDERS[0]);
+  const [by, setBy] = useState(DEFAULT_RECORDER);
+  const [recorders, setRecorders] = useState<string[]>([DEFAULT_RECORDER]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -82,6 +84,11 @@ export default function FabricTransactionsPage() {
     Promise.all([getFabrics(), getFabricLotMap()])
       .then(([fabs, lm]) => { setItems(fabs); setLotMap(lm); })
       .finally(() => setLoading(false));
+    // Populate the ผู้บันทึก dropdown from history — default name first, then the
+    // distinct recorders seen before. Non-fatal if it fails (default stays).
+    getRecorders()
+      .then((names) => setRecorders([DEFAULT_RECORDER, ...names.filter((n) => n !== DEFAULT_RECORDER)]))
+      .catch(() => {});
   }, [authed]);
 
   const lotsOf = (id: string) => lotMap.get(id) ?? [];
@@ -485,7 +492,7 @@ export default function FabricTransactionsPage() {
           </div>
           <div className="form-row">
             <label className="form-label">ผู้บันทึก · Created by</label>
-            <RecordedByField value={by} onChange={setBy} />
+            <RecordedByField value={by} onChange={setBy} options={recorders} />
           </div>
 
           {selected && (

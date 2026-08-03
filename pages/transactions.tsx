@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
-import { getAccessories, addTransaction, revertTransaction, getTransactionsByAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Lot, type Transaction } from "@/lib/store";
+import { getAccessories, addTransaction, revertTransaction, getTransactionsByAccessory, getLotMap, getRecorders, stockFromLots, valueFromLots, type Accessory, type Lot, type Transaction } from "@/lib/store";
 import { useRequireAccess } from "@/lib/auth";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
@@ -28,24 +28,25 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
 }
 
 // Who recorded the transaction (ผู้บันทึก). Defaults to the usual person on this
-// side, but the field is free text — anyone else can simply be typed in. RECORDERS
-// only supplies the dropdown suggestions; add names here as the roster grows.
-// The chosen name PERSISTS across consecutive entries (the post-save reset
+// side, but the field is free text — anyone else can simply be typed in. The
+// dropdown suggestions are the default name plus every distinct recorder already
+// seen in transaction history (loaded via getRecorders), so the roster grows on
+// its own. The chosen name PERSISTS across consecutive entries (the post-save reset
 // deliberately leaves `by` alone), so a long recording session isn't retyped.
-const RECORDERS = ["เตือน"];
+const DEFAULT_RECORDER = "เตือน";
 
-function RecordedByField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function RecordedByField({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
   return (
     <>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         list="acc-recorders"
-        placeholder={RECORDERS[0]}
+        placeholder={DEFAULT_RECORDER}
         autoComplete="off"
       />
       <datalist id="acc-recorders">
-        {RECORDERS.map((r) => <option key={r} value={r} />)}
+        {options.map((r) => <option key={r} value={r} />)}
       </datalist>
     </>
   );
@@ -68,8 +69,10 @@ export default function TransactionsPage() {
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split("T")[0]);
   const [refNo, setRefNo] = useState("");
   const [note, setNote] = useState("");
-  // Recorder for "ผู้บันทึก" — fixed to the single user for now (see RecordedByField).
-  const [by, setBy] = useState(RECORDERS[0]);
+  // Recorder for "ผู้บันทึก" — defaults to the usual person; dropdown suggestions are
+  // filled from transaction history (see RecordedByField / recorders below).
+  const [by, setBy] = useState(DEFAULT_RECORDER);
+  const [recorders, setRecorders] = useState<string[]>([DEFAULT_RECORDER]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -81,6 +84,11 @@ export default function TransactionsPage() {
     Promise.all([getAccessories(), getLotMap()])
       .then(([accs, lm]) => { setItems(accs); setLotMap(lm); })
       .finally(() => setLoading(false));
+    // Populate the ผู้บันทึก dropdown from history — default name first, then the
+    // distinct recorders seen before. Non-fatal if it fails (default stays).
+    getRecorders()
+      .then((names) => setRecorders([DEFAULT_RECORDER, ...names.filter((n) => n !== DEFAULT_RECORDER)]))
+      .catch(() => {});
   }, [authed]);
 
   const lotsOf = (id: string) => lotMap.get(id) ?? [];
@@ -129,6 +137,7 @@ export default function TransactionsPage() {
     const q = search.toLowerCase();
     return (
       i.type.toLowerCase().includes(q) ||
+      i.customer.toLowerCase().includes(q) ||
       i.acc_code.toLowerCase().includes(q) ||
       i.description.toLowerCase().includes(q) ||
       i.color.toLowerCase().includes(q) ||
@@ -248,12 +257,12 @@ export default function TransactionsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>ประเภท / รายละเอียด</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>ประเภท / รายละเอียด</th><th>ลูกค้า</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                   )}
                   {searchPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
@@ -265,6 +274,7 @@ export default function TransactionsPage() {
                           <div style={{ fontWeight: 500, fontSize: 17 }}>{item.type}</div>
                           <div style={{ fontSize: 14, color: "var(--text2)" }}>{item.description}{item.acc_code ? ` · ${item.acc_code}` : ""}</div>
                         </td>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.customer || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
                           {item.size || (item.row ? "" : "—")}
@@ -319,12 +329,12 @@ export default function TransactionsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>รายละเอียด</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>รายละเอียด</th><th>ลูกค้า</th><th>สี</th><th>ขนาด</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {variantsOfType.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
                   )}
                   {variantPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
@@ -336,6 +346,7 @@ export default function TransactionsPage() {
                           <div style={{ fontWeight: 500, fontSize: 16 }}>{item.description || "—"}</div>
                           {item.acc_code && <div style={{ fontSize: 14, color: "var(--text3)" }}>{item.acc_code}</div>}
                         </td>
+                        <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.customer || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
                           {item.size || (item.row ? "" : "—")}
@@ -488,7 +499,7 @@ export default function TransactionsPage() {
           </div>
           <div className="form-row">
             <label className="form-label">ผู้บันทึก · Created by</label>
-            <RecordedByField value={by} onChange={setBy} />
+            <RecordedByField value={by} onChange={setBy} options={recorders} />
           </div>
 
           {selected && (
