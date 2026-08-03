@@ -7,6 +7,7 @@ import { getFabrics, addFabricTransaction, revertFabricTransaction, getFabricTra
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { compareFabric } from "@/lib/sort";
+import { OwnerTag } from "@/lib/owner-tag";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -141,7 +142,8 @@ export default function FabricTransactionsPage() {
       i.color.toLowerCase().includes(q) ||
       i.width.toLowerCase().includes(q) ||
       i.fabric_code.toLowerCase().includes(q) ||
-      i.row_label.toLowerCase().includes(q)
+      i.row_label.toLowerCase().includes(q) ||
+      i.owner.toLowerCase().includes(q)
     );
   };
   const filtered = useMemo(() => items.filter(matchSearch).sort(compareFabric), [items, search]);
@@ -255,12 +257,12 @@ export default function FabricTransactionsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>ชนิดผ้า / โครงสร้าง</th><th>สี</th><th>หน้าผ้า</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>ชนิดผ้า / โครงสร้าง</th><th>เจ้าของ</th><th>สี</th><th>หน้าผ้า</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่พบรายการ</td></tr>
                   )}
                   {searchPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
@@ -272,6 +274,7 @@ export default function FabricTransactionsPage() {
                           <div style={{ fontWeight: 500, fontSize: 17 }}>{item.fabric_type}</div>
                           <div style={{ fontSize: 14, color: "var(--text2)" }}>{item.construction}{item.fabric_code ? ` · #${item.fabric_code}` : ""}</div>
                         </td>
+                        <td><OwnerTag owner={item.owner} /></td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
                           {item.width || "—"}
@@ -325,12 +328,12 @@ export default function FabricTransactionsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>โครงสร้าง / เลขที่</th><th>สี</th><th>หน้าผ้า</th><th className="num">สต็อคปัจจุบัน</th><th></th>
+                    <th>โครงสร้าง / เลขที่</th><th>เจ้าของ</th><th>สี</th><th>หน้าผ้า</th><th className="num">สต็อคปัจจุบัน</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {variantsOfType.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>ไม่มีรายการ</td></tr>
                   )}
                   {variantPg.pageItems.map((item) => {
                     const isSel = selected?.id === item.id;
@@ -342,6 +345,7 @@ export default function FabricTransactionsPage() {
                           <div style={{ fontWeight: 500, fontSize: 16 }}>{item.construction || "—"}</div>
                           {item.fabric_code && <div style={{ fontSize: 14, color: "var(--text3)" }}>#{item.fabric_code}</div>}
                         </td>
+                        <td><OwnerTag owner={item.owner} /></td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>{item.color || "—"}</td>
                         <td style={{ fontSize: 15, color: "var(--text2)" }}>
                           {item.width || "—"}
