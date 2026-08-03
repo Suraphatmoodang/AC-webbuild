@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { createFabricImportBatch } from "@/lib/fabric-store";
-import { parseFabricSheet, type FabricSheetRow } from "@/lib/fabric-sheet";
+import { parseFabricSheet, resolveFabricColumns, type FabricSheetRow } from "@/lib/fabric-sheet";
 import { OwnerTag } from "@/lib/owner-tag";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 
@@ -32,15 +32,30 @@ export default function FabricImportPage() {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Clear the input's value so picking the SAME file again still fires onChange —
+    // otherwise a second selection of the same path does nothing and looks frozen.
+    e.target.value = "";
     setFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const raw: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
-      if (raw.length < 2) { showToast("ไฟล์ว่างเปล่าหรือไม่มีข้อมูล", "error"); setRows([]); return; }
 
-      const { rows: parsed, cols } = parseFabricSheet(raw);
+      // Pick the first worksheet that actually carries the required headers, not just
+      // SheetNames[0] — the first tab may be a cover/instructions sheet with no data.
+      let picked: { raw: any[][]; name: string } | null = null;
+      let firstNonEmpty: { raw: any[][]; name: string } | null = null;
+      for (const name of wb.SheetNames) {
+        const raw = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[name], { header: 1, blankrows: false });
+        if (raw.length === 0) continue;
+        if (!firstNonEmpty) firstNonEmpty = { raw, name };
+        if (resolveFabricColumns(raw[0]).missing.length === 0) { picked = { raw, name }; break; }
+      }
+      const chosen = picked ?? firstNonEmpty;
+      if (!chosen || chosen.raw.length < 2) { showToast("ไฟล์ว่างเปล่าหรือไม่มีข้อมูล", "error"); setRows([]); return; }
+
+      // Displayed-text pass so เลขที่ is read as shown (leading zeros / long codes kept).
+      const shown = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[chosen.name], { header: 1, blankrows: false, raw: false });
+      const { rows: parsed, cols } = parseFabricSheet(chosen.raw, shown);
       if (cols.missing.length > 0) {
         showToast("ไม่พบคอลัมน์ที่จำเป็น: " + cols.missing.join(", "), "error");
         setRows([]);
@@ -59,13 +74,16 @@ export default function FabricImportPage() {
     setSaving(true);
     try {
       const { count, skipped } = await createFabricImportBatch(rows);
-      const msg = skipped > 0
-        ? `นำเข้า ${count} รายการ · ข้ามรายการซ้ำ ${skipped} รายการ`
-        : `นำเข้า ${count} รายการเข้าสู่รายการรอตรวจสอบแล้ว`;
+      const msg = count === 0 && skipped > 0
+        ? `ทุกรายการอยู่ในคิวตรวจสอบอยู่แล้ว — กำลังไปที่หน้าตรวจสอบ…`
+        : `นำเข้าเข้าสู่รายการรอตรวจสอบแล้ว`;
       showToast(msg, "success");
       setRows([]);
       setFileName("");
-      if (count > 0) setTimeout(() => router.push("/fabrics/import-review"), 1200);
+      // Redirect whenever anything from this file is now staged — newly inserted
+      // (count) or already pending from a prior upload (skipped) — so the user sees
+      // the staged rows instead of a bare "0".
+      if (count > 0 || skipped > 0) setTimeout(() => router.push("/fabrics/import-review"), 1200);
     } catch (e: any) {
       showToast("บันทึกไม่สำเร็จ: " + (e.message ?? ""), "error");
     } finally {

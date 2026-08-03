@@ -81,16 +81,29 @@ export default function ImportPage() {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Clear the input's value so picking the SAME file again still fires onChange —
+    // otherwise a second selection of the same path does nothing and looks frozen.
+    e.target.value = "";
     setFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const raw: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
-      if (raw.length < 2) { showToast("ไฟล์ว่างเปล่าหรือไม่มีข้อมูล", "error"); setRows([]); return; }
+
+      // Pick the first worksheet that actually carries the required headers, not just
+      // SheetNames[0] — the first tab may be a cover/instructions sheet with no data.
+      let picked: { raw: any[][]; name: string } | null = null;
+      let firstNonEmpty: { raw: any[][]; name: string } | null = null;
+      for (const name of wb.SheetNames) {
+        const raw = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[name], { header: 1, blankrows: false });
+        if (raw.length === 0) continue;
+        if (!firstNonEmpty) firstNonEmpty = { raw, name };
+        if (resolveColumns(raw[0]).missing.length === 0) { picked = { raw, name }; break; }
+      }
+      const chosen = picked ?? firstNonEmpty;
+      if (!chosen || chosen.raw.length < 2) { showToast("ไฟล์ว่างเปล่าหรือไม่มีข้อมูล", "error"); setRows([]); return; }
 
       // Resolve columns by header name (robust to reordering).
-      const { index, missing } = resolveColumns(raw[0]);
+      const { index, missing } = resolveColumns(chosen.raw[0]);
       if (missing.length > 0) {
         showToast("ไม่พบคอลัมน์ที่จำเป็น: " + missing.join(", "), "error");
         setRows([]);
@@ -101,10 +114,18 @@ export default function ImportPage() {
         return i >= 0 ? r[i] : undefined;
       };
 
-      const parsed: ParsedRow[] = raw.slice(1)
-        .filter((r) => str(g(r, "type")) || str(g(r, "description"))) // need type or description
-        .map((r) => ({
-          type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
+      // Second pass with raw:false yields each cell's DISPLAYED text. รหัสสินค้า is
+      // read from this pass so it comes through exactly as shown (leading zeros / long
+      // codes preserved) instead of as a number. Same options + sheet ⇒ row-aligned.
+      const shownBody = XLSX.utils
+        .sheet_to_json<any[]>(wb.Sheets[chosen.name], { header: 1, blankrows: false, raw: false })
+        .slice(1);
+
+      const parsed: ParsedRow[] = chosen.raw.slice(1)
+        .map((r, i) => ({ r, t: (shownBody[i] ?? []) as any[] }))
+        .filter(({ r }) => str(g(r, "type")) || str(g(r, "description"))) // need type or description
+        .map(({ r, t }) => ({
+          type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(t, "acc_code")), description: str(g(r, "description")),
           row: str(g(r, "row")) ? parseInt(str(g(r, "row"))) || null : null,
           color: str(g(r, "color")), size: str(g(r, "size")),
           quantity: num(g(r, "quantity")), min_quantity: num(g(r, "min_quantity")),
@@ -128,13 +149,16 @@ export default function ImportPage() {
     setSaving(true);
     try {
       const { count, skipped } = await createImportBatch(rows);
-      const msg = skipped > 0
-        ? `นำเข้า ${count} รายการ · ข้ามรายการซ้ำ ${skipped} รายการ`
-        : `นำเข้า ${count} รายการเข้าสู่รายการรอตรวจสอบแล้ว`;
+      const msg = count === 0 && skipped > 0
+        ? `ทุกรายการอยู่ในคิวตรวจสอบอยู่แล้ว — กำลังไปที่หน้าตรวจสอบ…`
+        : `นำเข้าเข้าสู่รายการรอตรวจสอบแล้ว`;
       showToast(msg, "success");
       setRows([]);
       setFileName("");
-      if (count > 0) setTimeout(() => router.push("/import-review"), 1200);
+      // Redirect whenever anything from this file is now staged — whether newly
+      // inserted (count) or already pending from a prior upload (skipped) — so the
+      // user sees the staged rows instead of a bare "0".
+      if (count > 0 || skipped > 0) setTimeout(() => router.push("/import-review"), 1200);
     } catch (e: any) {
       showToast("บันทึกไม่สำเร็จ: " + (e.message ?? ""), "error");
     } finally {

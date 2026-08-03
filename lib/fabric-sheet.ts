@@ -139,16 +139,23 @@ export function resolveFabricColumns(headerRow: any[]): ResolvedColumns {
 
 // Turn a raw sheet (row 0 = headers) into typed rows. Rows without a ชนิดผ้า AND
 // without a สี are treated as spacers/notes and dropped.
-export function parseFabricSheet(raw: any[][]): { rows: FabricSheetRow[]; cols: ResolvedColumns } {
+//
+// `rawShown` is an optional second read of the SAME sheet with raw:false (cell
+// DISPLAYED text). When given, เลขที่ (fabric_code) is taken from it so a code like
+// "0032" comes through as text instead of the number 32 — matching how the importer
+// stored it. Both reads use identical options, so row i lines up across the two.
+export function parseFabricSheet(raw: any[][], rawShown?: any[][]): { rows: FabricSheetRow[]; cols: ResolvedColumns } {
   const cols = resolveFabricColumns(raw[0] ?? []);
   const g = (r: any[], field: string) => {
     const i = cols.index[field];
     return i >= 0 ? r[i] : undefined;
   };
+  const shownBody = (rawShown ?? []).slice(1);
 
   const rows = raw.slice(1)
-    .filter((r) => str(g(r, "fabric_type")) || str(g(r, "color")))
-    .map((r): FabricSheetRow => ({
+    .map((r, i) => ({ r, t: (shownBody[i] ?? []) as any[] }))
+    .filter(({ r }) => str(g(r, "fabric_type")) || str(g(r, "color")))
+    .map(({ r, t }): FabricSheetRow => ({
       id: str(g(r, "id")),
       fabric_type: str(g(r, "fabric_type")),
       composition: str(g(r, "composition")),
@@ -158,7 +165,7 @@ export function parseFabricSheet(raw: any[][]): { rows: FabricSheetRow[]; cols: 
       weight: num(g(r, "weight")),
       weight_unit: str(g(r, "weight_unit")),
       row_label: str(g(r, "row_label")),
-      fabric_code: str(g(r, "fabric_code")),
+      fabric_code: str(rawShown ? g(t, "fabric_code") : g(r, "fabric_code")),
       quantity: num(g(r, "quantity")),
       min_quantity: num(g(r, "min_quantity")),
       unit: str(g(r, "unit")),

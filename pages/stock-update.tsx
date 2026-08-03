@@ -100,11 +100,14 @@ export default function StockUpdatePage() {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Clear the input so re-selecting the SAME file still fires onChange.
+    e.target.value = "";
     setFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const raw: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
+      const sheetName = wb.SheetNames[0];
+      const raw: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, blankrows: false });
       if (raw.length < 2) { showToast("ไฟล์ว่างเปล่า", "error"); return; }
 
       // Resolve columns by header
@@ -120,6 +123,13 @@ export default function StockUpdatePage() {
 
       const g = (r: any[], f: string) => { const i = colIdx[f]; return i >= 0 ? r[i] : undefined; };
 
+      // Displayed-text pass (raw:false) — รหัสสินค้า is read from here so a code like
+      // "0032" matches the text value stored in the DB instead of arriving as 32.
+      // Row-aligned with `raw` (same sheet + options).
+      const shownBody = XLSX.utils
+        .sheet_to_json<any[]>(wb.Sheets[sheetName], { header: 1, blankrows: false, raw: false })
+        .slice(1);
+
       // Build match index over existing accessories, plus an id→item map for exact mode.
       const identity = await buildAccessoryMatchIndex();
       const byId = new Map<string, Accessory>();
@@ -127,10 +137,11 @@ export default function StockUpdatePage() {
       const data: MatchData = { identity, byId };
 
       const base: BaseRow[] = raw.slice(1)
-        .filter((r) => str(g(r, "type")) || str(g(r, "description")))
-        .map((r) => ({
+        .map((r, i) => ({ r, t: (shownBody[i] ?? []) as any[] }))
+        .filter(({ r }) => str(g(r, "type")) || str(g(r, "description")))
+        .map(({ r, t }) => ({
           id: str(g(r, "id")),
-          type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(r, "acc_code")), description: str(g(r, "description")),
+          type: str(g(r, "type")), customer: str(g(r, "customer")), acc_code: str(g(t, "acc_code")), description: str(g(r, "description")),
           color: str(g(r, "color")), size: str(g(r, "size")),
           quantity: num(g(r, "quantity")), unit_cost: num(g(r, "unit_cost")),
           min_quantity: num(g(r, "min_quantity")), unit: str(g(r, "unit")), supplier_name: str(g(r, "supplier_name")),

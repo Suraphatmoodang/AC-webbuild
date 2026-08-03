@@ -4,7 +4,7 @@ import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { buildFabricMatchIndex, fabricMatchKeyForRow, applyFabricUpdates, getSuppliers,
   type Fabric, type Supplier, type FabricUpdatableField } from "@/lib/fabric-store";
-import { parseFabricSheet, type FabricSheetRow } from "@/lib/fabric-sheet";
+import { parseFabricSheet, resolveFabricColumns, type FabricSheetRow } from "@/lib/fabric-sheet";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { OwnerTag } from "@/lib/owner-tag";
@@ -88,14 +88,29 @@ export default function FabricStockUpdatePage() {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Clear the input so re-selecting the SAME file still fires onChange.
+    e.target.value = "";
     setFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const raw: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
-      if (raw.length < 2) { showToast("ไฟล์ว่างเปล่า", "error"); return; }
 
-      const { rows: parsed, cols } = parseFabricSheet(raw);
+      // Pick the first worksheet that actually carries the required headers, not just
+      // SheetNames[0] — the first tab may be a cover/instructions sheet with no data.
+      let picked: { raw: any[][]; name: string } | null = null;
+      let firstNonEmpty: { raw: any[][]; name: string } | null = null;
+      for (const name of wb.SheetNames) {
+        const r = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[name], { header: 1, blankrows: false });
+        if (r.length === 0) continue;
+        if (!firstNonEmpty) firstNonEmpty = { raw: r, name };
+        if (resolveFabricColumns(r[0]).missing.length === 0) { picked = { raw: r, name }; break; }
+      }
+      const chosen = picked ?? firstNonEmpty;
+      if (!chosen || chosen.raw.length < 2) { showToast("ไฟล์ว่างเปล่า", "error"); return; }
+
+      // Displayed-text pass so เลขที่ matches the text value stored in the DB.
+      const shown = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[chosen.name], { header: 1, blankrows: false, raw: false });
+      const { rows: parsed, cols } = parseFabricSheet(chosen.raw, shown);
       setSheetCols(cols.present);
 
       // Build the match index over existing fabrics, plus an id→item map for exact mode.
