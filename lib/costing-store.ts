@@ -63,13 +63,16 @@ import { getFabrics, getFabricLotMap } from "./fabric-store";
 //     -- cost inputs
 //     fabric_lines jsonb not null default '[]',
 //     extras jsonb not null default '[]',
-//     sew_labor numeric not null default 0,
-//     cut_labor numeric not null default 0,
-//     output_day numeric not null default 0,
+//     sew_labor numeric not null default 0,    -- labor: เช็ค (repurposed; was เย็บ)
+//     cut_labor numeric not null default 0,     -- labor: ตัด
+//     pack_labor numeric not null default 0,    -- labor: แพ็ค
+//     output_day numeric not null default 0,    -- LEGACY (overhead used to be ÷ this); unused, kept for old rows
 //     waste_pct numeric not null default 3,
-//     overhead_baht numeric not null default 8000,
+//     overhead_baht numeric not null default 8000, -- LEGACY (was โสหุ้ย/วัน); unused, kept for old rows
+//     overhead_pc numeric not null default 0,   -- โสหุ้ย/ตัว (baht per piece, typed directly)
 //     profit_pct numeric not null default 10,
 //     cutting_loss_pct numeric not null default 5,
+//     actual_entries jsonb not null default '[]',   -- Phase D: hand-logged actual costs
 //     note text not null default '',
 //     created_by text not null default '',
 //     created_at timestamptz not null default now(),
@@ -99,12 +102,49 @@ export function statusMeta(key: string) {
 // fixed size schema — new labels can be added freely without any migration.
 export const DEFAULT_SIZE_LABELS = ["S", "M", "L", "XL"];
 export type SizeRow = { color: string; qty: Record<string, number> };
-// A fabric used in the garment. `fabric_id` optionally links to a real ผ้า item so
-// price_per_yard can be auto-filled from live stock; it's still overridable by hand.
-export type FabricLine = { label: string; fabric_id: string | null; yard_per_pc: number; price_per_yard: number };
-// A trim / print / packaging cost, per piece (THB). `accessory_id` optionally links
-// to a real อุปกรณ์ item to auto-fill `amount` from its current price.
-export type ExtraLine = { label: string; accessory_id: string | null; amount: number };
+// A fabric used in the garment. `fabric_id` links to a real ผ้า item so the spec + price
+// can be auto-filled from live stock; null = a PLACEHOLDER (fabric not in stock yet), to be
+// linked retroactively once it arrives. All spec fields stay overridable by hand.
+//   · label       = หน้าที่ใช้ (garment part: ตัวเสื้อ / ปก / ซับใน) — optional
+//   · code        = เลขที่ (fabric number/code)
+//   · fabric_type = ชนิดผ้า (composition/type, e.g. "60% cotton 40% spandex")
+//   · color / width = สี / หน้าผ้า (หน้าผ้า is descriptive only — NOT in the cost math)
+//   · unit        = หน่วย ("หลา" | "กิโล"); yard_per_pc & price_per_yard are IN that unit
+// Note: the JSONB keys yard_per_pc / price_per_yard are kept (generic "qty per pc" / "price
+// per unit") so existing saved lines don't need a backfill; the UI labels them จำนวน/ตัว & ราคา/หน่วย.
+export type FabricLine = {
+  label: string; fabric_id: string | null;
+  code: string; fabric_type: string; color: string; width: string;
+  unit: string; yard_per_pc: number; price_per_yard: number;
+};
+// A trim / print / packaging cost. `accessory_id` links to a real อุปกรณ์ item (null =
+// PLACEHOLDER, linked retroactively once it's in stock), mirroring the fabric line.
+// Two cost modes per line:
+//   · "flat" → a single per-piece baht amount (`amount`) — good for printing / packing
+//   · "qty"  → `qty_per_pc × unit_price` in `unit` — good for counted trims (ซิป, กระดุม)
+// Old rows have no `mode` and are treated as "flat" (they only carry `amount`).
+export type ExtraLine = {
+  label: string; accessory_id: string | null;
+  mode: "flat" | "qty"; amount: number; qty_per_pc: number; unit: string; unit_price: number;
+};
+// Per-line cost, honoring the mode (old rows with no mode fall back to the flat amount).
+export function extraLineCost(e: { mode?: string; amount: number; qty_per_pc?: number; unit_price?: number }): number {
+  const num = (v: any) => (isFinite(Number(v)) ? Number(v) : 0);
+  return e.mode === "qty" ? num(e.qty_per_pc) * num(e.unit_price) : num(e.amount);
+}
+
+// Phase D — a hand-logged ACTUAL cost incurred on the order (labor paid, dye bill, transport,
+// off-system material buy, rework…). Material actuals are mostly DERIVED from tagged OUT
+// transactions (see getOrderActualMaterial); these entries capture everything else + any
+// material bought outside the stock system. Stored as JSONB `actual_entries` (no per-field migration).
+export const ACTUAL_CATEGORIES = [
+  { key: "material", th: "วัตถุดิบ" },
+  { key: "labor",    th: "ค่าแรง" },
+  { key: "overhead", th: "โสหุ้ย" },
+  { key: "other",    th: "อื่นๆ" },
+] as const;
+export type ActualCategory = (typeof ACTUAL_CATEGORIES)[number]["key"];
+export type ActualEntry = { date: string; category: ActualCategory; label: string; amount: number; note: string };
 
 export type ProductCosting = {
   id: string;
@@ -150,13 +190,16 @@ export type ProductCosting = {
   iron_count: number;
   fabric_lines: FabricLine[];
   extras: ExtraLine[];
-  sew_labor: number;
-  cut_labor: number;
-  output_day: number;
+  sew_labor: number;   // labor: เช็ค (repurposed; was เย็บ)
+  cut_labor: number;   // labor: ตัด
+  pack_labor: number;  // labor: แพ็ค
+  output_day: number;    // LEGACY, unused (overhead is now typed per-piece)
   waste_pct: number;
-  overhead_baht: number;
+  overhead_baht: number; // LEGACY, unused
+  overhead_pc: number;   // โสหุ้ย/ตัว (baht per piece)
   profit_pct: number;
   cutting_loss_pct: number;
+  actual_entries: ActualEntry[];   // Phase D: hand-logged actual costs (JSONB)
   note: string;
   created_by: string;
   created_at: string;
@@ -171,8 +214,8 @@ export type CostingInput = Omit<ProductCosting, "id" | "created_at" | "updated_a
 //               no divide-by-order-qty (the GKM sheet's yard field was really total)
 //   · material = fabric + Σ trims/print/packaging (each already per piece)
 //   · waste    = material × waste%
-//   · labor    = sewing + cutting
-//   · overhead = overhead-per-day ÷ output-per-day
+//   · labor    = ตัด + เช็ค + แพ็ค
+//   · overhead = โสหุ้ย/ตัว (typed directly per piece)
 //   · total    = material + waste + labor + overhead
 //   · profit   = margin ON THE PRICE:  total ÷ (1 − margin%) − total
 //   · price    = total + profit
@@ -191,22 +234,22 @@ export type CostBreakdown = {
 export function computeCosting(c: {
   fabric_lines: FabricLine[];
   extras: ExtraLine[];
-  sew_labor: number;
-  cut_labor: number;
-  output_day: number;
+  sew_labor: number;   // เช็ค
+  cut_labor: number;   // ตัด
+  pack_labor: number;  // แพ็ค
   waste_pct: number;
-  overhead_baht: number;
+  overhead_pc: number; // โสหุ้ย/ตัว (typed directly)
   profit_pct: number;
   cutting_loss_pct: number;
 }): CostBreakdown {
   const num = (v: any) => (isFinite(Number(v)) ? Number(v) : 0);
   const fabricRaw = c.fabric_lines.reduce((s, f) => s + num(f.yard_per_pc) * num(f.price_per_yard), 0);
   const fabricPerPc = fabricRaw * (1 + num(c.cutting_loss_pct) / 100);
-  const extrasSum = c.extras.reduce((s, e) => s + num(e.amount), 0);
+  const extrasSum = c.extras.reduce((s, e) => s + extraLineCost(e), 0);
   const materialSubtotal = fabricPerPc + extrasSum;
   const wasteCost = materialSubtotal * (num(c.waste_pct) / 100);
-  const laborTotal = num(c.sew_labor) + num(c.cut_labor);
-  const overheadPerPc = num(c.output_day) > 0 ? num(c.overhead_baht) / num(c.output_day) : 0;
+  const laborTotal = num(c.cut_labor) + num(c.sew_labor) + num(c.pack_labor);   // ตัด + เช็ค + แพ็ค
+  const overheadPerPc = num(c.overhead_pc);
   const totalCost = materialSubtotal + wasteCost + laborTotal + overheadPerPc;
   const denom = 1 - num(c.profit_pct) / 100;
   const profit = denom > 0 ? totalCost / denom - totalCost : 0;
@@ -217,11 +260,11 @@ export function computeCosting(c: {
 // Whether any cost input has been entered — used to show "—" instead of ฿0.00
 // for orders that are logged but not yet costed (costing is optional).
 export function hasCosting(c: {
-  fabric_lines: FabricLine[]; extras: ExtraLine[]; sew_labor: number; cut_labor: number;
+  fabric_lines: FabricLine[]; extras: ExtraLine[]; sew_labor: number; cut_labor: number; pack_labor: number;
 }): boolean {
   const fab = c.fabric_lines.some((f) => Number(f.yard_per_pc) > 0 && Number(f.price_per_yard) > 0);
-  const ex = c.extras.some((e) => Number(e.amount) > 0);
-  return fab || ex || Number(c.sew_labor) > 0 || Number(c.cut_labor) > 0;
+  const ex = c.extras.some((e) => extraLineCost(e) > 0);
+  return fab || ex || Number(c.sew_labor) > 0 || Number(c.cut_labor) > 0 || Number(c.pack_labor) > 0;
 }
 
 // ── CRUD ─────────────────────────────────────────────────────────────
@@ -291,7 +334,12 @@ export async function deleteCosting(id: string): Promise<void> {
 // current data instead of hand-typed guesses. "Current price" = weighted-average
 // cost of the item's remaining lots (the authoritative figure); when an item is out
 // of stock (no lots) we fall back to its reference `unit_cost`.
-export type PriceOption = { id: string; label: string; unit: string; price: number };
+// `label`/`unit`/`price` are common to both sides; the extra spec fields are set for
+// fabrics only, so a picked fabric can auto-fill เลขที่/ชนิดผ้า/สี/หน้าผ้า on the costing line.
+export type PriceOption = {
+  id: string; label: string; unit: string; price: number;
+  code?: string; fabric_type?: string; color?: string; width?: string;
+};
 
 function avgCost(lots: { quantity_remaining: number; unit_cost: number }[] | undefined, fallback: number): number {
   if (!lots || lots.length === 0) return fallback;
@@ -301,15 +349,10 @@ function avgCost(lots: { quantity_remaining: number; unit_cost: number }[] | und
   return val / qty;
 }
 
-export async function getPriceSources(): Promise<{ fabrics: PriceOption[]; accessories: PriceOption[] }> {
-  const [accs, accLots, fabs, fabLots] = await Promise.all([
-    getAccessories(true),
-    getLotMap(),
-    getFabrics(true),
-    getFabricLotMap(),
-  ]);
-
-  const accessories: PriceOption[] = accs
+async function loadAccessoryPrices(): Promise<PriceOption[]> {
+  // ALL items (not active-only) so this matches what /stock lists.
+  const [accs, accLots] = await Promise.all([getAccessories(), getLotMap()]);
+  return accs
     .map((a) => ({
       id: a.id,
       label: [a.type, a.description, a.color, a.size].filter((x) => String(x).trim()).join(" · "),
@@ -317,15 +360,132 @@ export async function getPriceSources(): Promise<{ fabrics: PriceOption[]; acces
       price: avgCost(accLots.get(a.id), Number(a.unit_cost) || 0),
     }))
     .sort((x, y) => x.label.localeCompare(y.label, "th"));
+}
 
-  const fabrics: PriceOption[] = fabs
+async function loadFabricPrices(): Promise<PriceOption[]> {
+  const [fabs, fabLots] = await Promise.all([getFabrics(), getFabricLotMap()]);
+  return fabs
     .map((f) => ({
       id: f.id,
-      label: [f.fabric_type, f.color, f.width].filter((x) => String(x).trim()).join(" · "),
+      label: [f.fabric_code, f.fabric_type, f.color, f.width].filter((x) => String(x).trim()).join(" · "),
       unit: f.cost_unit || f.unit,
       price: avgCost(fabLots.get(f.id), Number(f.unit_cost) || 0),
+      code: f.fabric_code ?? "",
+      fabric_type: f.fabric_type ?? "",
+      color: f.color ?? "",
+      width: f.width ?? "",
     }))
     .sort((x, y) => x.label.localeCompare(y.label, "th"));
+}
 
+// ── Active orders (for tagging transactions) ─────────────────────────
+// A lightweight list of orders that are still "live" (not done/cancelled), used to power
+// the searchable order selector on the transaction pages. `label` is a search-friendly
+// one-liner; the individual fields drive the confirm preview.
+export type OrderRef = {
+  id: string; code: string; customer: string; style_no: string; po_no: string;
+  description: string; status: string; due_date: string | null; label: string;
+};
+
+export async function getActiveOrders(): Promise<OrderRef[]> {
+  const { data, error } = await supabase
+    .from("product_costings")
+    .select("id, code, customer, style_no, po_no, description, status, due_date")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? [])
+    .filter((o: any) => o.status !== "done" && o.status !== "cancelled")
+    .map((o: any) => ({
+      id: o.id, code: o.code ?? "", customer: o.customer ?? "", style_no: o.style_no ?? "",
+      po_no: o.po_no ?? "", description: o.description ?? "", status: o.status ?? "quote",
+      due_date: o.due_date ?? null,
+      label: [o.code, o.customer, o.style_no || o.po_no, o.description]
+        .map((x) => String(x ?? "").trim()).filter(Boolean).join(" · "),
+    }));
+}
+
+// ── Per-order material flows (received / used) ───────────────────────
+// Aggregates the transactions tagged to an order — by hard link (order_id) OR, for an order
+// that wasn't in the system when recorded, by reference_no matching the order's code. Grouped
+// per stock item id; IN/RETURN → received, OUT → used. Resilient: if the order_id column
+// isn't migrated yet (or anything errors), returns empty maps so the page still renders.
+export type ItemFlow = { received: number; used: number };
+
+export async function getOrderFlows(orderId: string, code: string): Promise<{ acc: Map<string, ItemFlow>; fab: Map<string, ItemFlow> }> {
+  const acc = new Map<string, ItemFlow>();
+  const fab = new Map<string, ItemFlow>();
+  const codeTrim = (code || "").trim();
+  const add = (map: Map<string, ItemFlow>, id: string | null, type: string, qty: number) => {
+    if (!id) return;
+    const cur = map.get(id) ?? { received: 0, used: 0 };
+    if (type === "IN" || type === "RETURN") cur.received += qty;
+    else if (type === "OUT") cur.used += qty;
+    map.set(id, cur);
+  };
+  const filt = (q: any) => (codeTrim ? q.or(`order_id.eq.${orderId},reference_no.eq.${codeTrim}`) : q.eq("order_id", orderId));
+  try {
+    const [accRes, fabRes] = await Promise.all([
+      filt(supabase.from("accessory_transactions").select("accessory_id, transaction_type, quantity")),
+      filt(supabase.from("fabric_transactions").select("fabric_id, transaction_type, quantity")),
+    ]);
+    if (!accRes.error) for (const r of (accRes.data ?? []) as any[]) add(acc, r.accessory_id, r.transaction_type, Number(r.quantity) || 0);
+    if (!fabRes.error) for (const r of (fabRes.data ?? []) as any[]) add(fab, r.fabric_id, r.transaction_type, Number(r.quantity) || 0);
+  } catch {
+    /* order_id not migrated yet, or a transient error — fall back to empty (planned-only view) */
+  }
+  return { acc, fab };
+}
+
+// ── Actual material cost (Phase D) ───────────────────────────────────
+// The REAL material spend consumed for an order = Σ over the order's tagged OUT transactions
+// of (consumed qty × that lot's unit_cost) — read straight from lot_effects + the lots' cost,
+// so it reflects true FIFO/LIFO cost, not a re-typed estimate. Resilient: any error → 0.
+async function sumLotCosts(table: "accessory_lots" | "fabric_lots", consumed: Map<string, number>): Promise<number> {
+  if (consumed.size === 0) return 0;
+  const ids = Array.from(consumed.keys());
+  let sum = 0;
+  const CHUNK = 300;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data, error } = await supabase.from(table).select("id, unit_cost").in("id", ids.slice(i, i + CHUNK));
+    if (error) continue;
+    for (const lot of (data ?? []) as any[]) sum += (consumed.get(lot.id) ?? 0) * (Number(lot.unit_cost) || 0);
+  }
+  return sum;
+}
+
+export async function getOrderActualMaterial(orderId: string, code: string): Promise<number> {
+  const codeTrim = (code || "").trim();
+  const filt = (q: any) => (codeTrim ? q.or(`order_id.eq.${orderId},reference_no.eq.${codeTrim}`) : q.eq("order_id", orderId));
+  try {
+    const [accTx, fabTx] = await Promise.all([
+      filt(supabase.from("accessory_transactions").select("lot_effects").eq("transaction_type", "OUT")),
+      filt(supabase.from("fabric_transactions").select("lot_effects").eq("transaction_type", "OUT")),
+    ]);
+    const gather = (rows: any[] | null | undefined) => {
+      const m = new Map<string, number>();
+      for (const r of rows ?? []) {
+        const eff = r.lot_effects;
+        if (eff && eff.op === "consume" && Array.isArray(eff.lots)) {
+          for (const l of eff.lots) if (l?.lot_id) m.set(l.lot_id, (m.get(l.lot_id) ?? 0) + (Number(l.consumed) || 0));
+        }
+      }
+      return m;
+    };
+    const accConsumed = accTx.error ? new Map<string, number>() : gather(accTx.data as any[]);
+    const fabConsumed = fabTx.error ? new Map<string, number>() : gather(fabTx.data as any[]);
+    const [accCost, fabCost] = await Promise.all([sumLotCosts("accessory_lots", accConsumed), sumLotCosts("fabric_lots", fabConsumed)]);
+    return accCost + fabCost;
+  } catch {
+    return 0;
+  }
+}
+
+export async function getPriceSources(): Promise<{ fabrics: PriceOption[]; accessories: PriceOption[] }> {
+  // Each side loads independently so a failure (or slow query) on one can't blank the other;
+  // a failing side logs and returns [] instead of taking the whole dropdown set down with it.
+  const [accessories, fabrics] = await Promise.all([
+    loadAccessoryPrices().catch((e) => { console.error("getPriceSources: accessories failed", e); return [] as PriceOption[]; }),
+    loadFabricPrices().catch((e) => { console.error("getPriceSources: fabrics failed", e); return [] as PriceOption[]; }),
+  ]);
   return { fabrics, accessories };
 }

@@ -2,19 +2,19 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import { getAccessories, getLotMap, valueFromLots as accValue } from "@/lib/store";
-import { getFabrics, getFabricLotMap, valueFromLots as fabValue } from "@/lib/fabric-store";
-import { useSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
+import { getFabrics, getFabricLotMap, valueFromLots as fabValue, SELF_OWNER } from "@/lib/fabric-store";
+import { useSession, endSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
 
 // Section picker. The two stock systems (อุปกรณ์ / ผ้า) are fully independent —
 // separate tables, separate pages, separate logs — and share only Suppliers.
 // This page is the only place they meet, so it also shows a live count/value of
 // each so you can see at a glance which side you're heading into.
 
-// `external` = value of stock owned by ANOTHER company (fabric consignment; owner set).
-// Undefined on the accessory side, which has no ownership concept.
-// `byCustomer` = accessory value/item-count grouped by ลูกค้า (undefined on fabrics).
-type CustBreak = { customer: string; items: number; value: number };
-type Stat = { items: number; value: number; external?: number; byCustomer?: CustBreak[] } | null;
+// `external` = value of fabric owned by ANOTHER factory (owner set); undefined on accessories.
+// `groups` = value/item-count grouped by the side's "label" field — ลูกค้า for accessories,
+// เจ้าของ for fabrics — so both cards show a parallel breakdown list.
+type Grouped = { label: string; items: number; value: number };
+type Stat = { items: number; value: number; external?: number; groups?: Grouped[] } | null;
 
 const NO_CUSTOMER = "ไม่ระบุลูกค้า";
 
@@ -40,9 +40,10 @@ export default function HomePage() {
   const { role } = useSession();
   const [acc, setAcc] = useState<Stat>(null);
   const [fab, setFab] = useState<Stat>(null);
-  const [showAllCust, setShowAllCust] = useState(false);
+  // Per-card "show all" toggle, keyed by section href (both cards now have a breakdown list).
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const CUST_PREVIEW = 5;   // how many customers to show before "ดูทั้งหมด"
+  const GROUP_PREVIEW = 5;   // how many rows to show before "ดูทั้งหมด"
 
   // useRequireAccess bounces here with ?denied=<section> when a role opens
   // the other section's admin pages. Both stock pages stay publicly viewable, so
@@ -55,29 +56,42 @@ export default function HomePage() {
     Promise.all([getAccessories(), getLotMap()])
       .then(([items, lm]) => {
         // Group value + item count by customer (blank → NO_CUSTOMER), high value first.
-        const by = new Map<string, CustBreak>();
+        const by = new Map<string, Grouped>();
         let value = 0;
         for (const a of items) {
           const v = accValue(lm.get(a.id) ?? []);
           value += v;
           const key = a.customer.trim() || NO_CUSTOMER;
-          const cur = by.get(key) ?? { customer: key, items: 0, value: 0 };
+          const cur = by.get(key) ?? { label: key, items: 0, value: 0 };
           cur.items += 1;
           cur.value += v;
           by.set(key, cur);
         }
-        const byCustomer = Array.from(by.values()).sort((x, y) => y.value - x.value);
-        setAcc({ items: items.length, value, byCustomer });
+        const groups = Array.from(by.values()).sort((x, y) => y.value - x.value);
+        setAcc({ items: items.length, value, groups });
       })
       .catch(() => setAcc({ items: 0, value: 0 }));
 
     Promise.all([getFabrics(), getFabricLotMap()])
-      .then(([items, lm]) => setFab({
-        items: items.length,
-        value: items.reduce((s, f) => s + fabValue(lm.get(f.id) ?? []), 0),
-        external: items.filter((f) => f.owner.trim() !== "")
-          .reduce((s, f) => s + fabValue(lm.get(f.id) ?? []), 0),
-      }))
+      .then(([items, lm]) => {
+        // Mirror of the accessory card: group value + item count by owner (blank = ours → AC),
+        // high value first; also keep the external (other-factory) total broken out separately.
+        const by = new Map<string, Grouped>();
+        let value = 0, external = 0;
+        for (const f of items) {
+          const v = fabValue(lm.get(f.id) ?? []);
+          value += v;
+          const owner = f.owner.trim();
+          if (owner) external += v;
+          const key = owner || SELF_OWNER;
+          const cur = by.get(key) ?? { label: key, items: 0, value: 0 };
+          cur.items += 1;
+          cur.value += v;
+          by.set(key, cur);
+        }
+        const groups = Array.from(by.values()).sort((x, y) => y.value - x.value);
+        setFab({ items: items.length, value, external, groups });
+      })
       .catch(() => setFab({ items: 0, value: 0 }));
   }, []);
 
@@ -91,11 +105,26 @@ export default function HomePage() {
         </div>
         <h1 style={{ fontSize: 26, fontWeight: 500, marginTop: 8 }}>เลือกระบบสต็อค</h1>
         <div style={{ fontSize: 16, color: "var(--text3)", marginTop: 4 }}>Choose a stock system</div>
-        {role && (
-          <div style={{ fontSize: 14, color: "var(--text3)", marginTop: 10 }}>
-            เข้าสู่ระบบในฐานะ <strong style={{ color: "var(--text2)" }}>{ROLE_LABELS[role].th}</strong>
-          </div>
-        )}
+        {/* Login/logout lives here because the shared header is hidden on "/". This only
+            authenticates — the landing page and both stock pages stay publicly viewable;
+            logging in just unlocks the areas that are actually gated (admin/ops). */}
+        <div style={{ marginTop: 12, display: "flex", justifyContent: "center", alignItems: "center", gap: 10, fontSize: 14, flexWrap: "wrap" }}>
+          {role ? (
+            <>
+              <span style={{ color: "var(--text3)" }}>
+                เข้าสู่ระบบในฐานะ <strong style={{ color: "var(--text2)" }}>{ROLE_LABELS[role].th}</strong>
+              </span>
+              <button className="ghost" style={{ padding: "4px 12px", fontSize: 13 }}
+                onClick={() => { endSession(); router.reload(); }}>
+                ออกจากระบบ
+              </button>
+            </>
+          ) : (
+            <button className="primary" style={{ padding: "7px 18px", fontSize: 14 }} onClick={() => router.push("/login")}>
+              เข้าสู่ระบบ
+            </button>
+          )}
+        </div>
       </div>
 
       {denied && (
@@ -140,38 +169,27 @@ export default function HomePage() {
                         ฿{st.value.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
                       </span>
                     </div>
-                    {st.external ? (
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 7, fontSize: 12 }}>
-                        <span style={{ color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: 999, background: "#7c3aed", flexShrink: 0 }} />
-                          ของโรงงานอื่น (ฝากเก็บ)
-                        </span>
-                        <span style={{ fontFamily: "var(--mono)", color: "#7c3aed" }}>
-                          ฿{st.external.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
-                        </span>
-                      </div>
-                    ) : null}
-
-                    {/* Accessory value/items broken down per customer (kept below the total). */}
-                    {s.section === "acc" && st.byCustomer && st.byCustomer.length > 0 && (
+                    {/* Value/items broken down by the side's label field — ลูกค้า (accessories)
+                        or เจ้าของ (fabrics). Same layout on both cards for consistency. */}
+                    {st.groups && st.groups.length > 0 && (
                       <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
-                        <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>ตามลูกค้า</div>
-                        {(showAllCust ? st.byCustomer : st.byCustomer.slice(0, CUST_PREVIEW)).map((c) => (
-                          <div key={c.customer} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" }}>
+                        <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>{s.section === "acc" ? "ตามลูกค้า" : "ตามเจ้าของ"}</div>
+                        {(expanded[s.href] ? st.groups : st.groups.slice(0, GROUP_PREVIEW)).map((g) => (
+                          <div key={g.label} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" }}>
                             <span style={{ color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {c.customer} <span style={{ color: "var(--text3)" }}>· {c.items.toLocaleString()} รายการ</span>
+                              {g.label} <span style={{ color: "var(--text3)" }}>· {g.items.toLocaleString()} รายการ</span>
                             </span>
                             <span style={{ fontFamily: "var(--mono)", color: "var(--text2)", flexShrink: 0 }}>
-                              ฿{c.value.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                              ฿{g.value.toLocaleString("th-TH", { maximumFractionDigits: 0 })}
                             </span>
                           </div>
                         ))}
-                        {st.byCustomer.length > CUST_PREVIEW && (
+                        {st.groups.length > GROUP_PREVIEW && (
                           <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAllCust((v) => !v); }}
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((m) => ({ ...m, [s.href]: !m[s.href] })); }}
                             style={{ background: "transparent", border: "none", padding: "4px 0 0", color: "var(--accent)", fontSize: 12, cursor: "pointer" }}
                           >
-                            {showAllCust ? "ย่อ" : `ดูทั้งหมด (${st.byCustomer.length})`}
+                            {expanded[s.href] ? "ย่อ" : `ดูทั้งหมด (${st.groups.length})`}
                           </button>
                         )}
                       </div>

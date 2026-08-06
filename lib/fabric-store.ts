@@ -108,6 +108,10 @@ export type FabricTransaction = {
   created_by: string;
   created_at: string;
   lot_effects?: FabricLotEffect | null;
+  // Order tracking (Phase C) — mirror of the accessory side. `order_id` hard-links to a
+  // costing/order; for an order not yet in the system, leave null and put its code in
+  // reference_no. Optional until the migration adds order_id to fabric_transactions.
+  order_id?: string | null;
 };
 
 // ── Fabric suppliers ─────────────────────────────────────
@@ -317,6 +321,7 @@ export async function addFabricTransaction(opts: {
   reference_no?: string;
   note?: string;
   created_by?: string;
+  order_id?: string | null;          // Phase C: tag this movement to an order (pending order → leave null, put code in reference_no)
 }): Promise<{ ok: true; before: number; after: number } | { error: string }> {
   const { fabric_id, type, qty } = opts;
   try {
@@ -363,16 +368,19 @@ export async function addFabricTransaction(opts: {
     const lotsAfter = await getFabricLots(fabric_id);
     const after = stockFromLots(lotsAfter);
 
-    const payload = { fabric_id, transaction_type: type, quantity: txQty,
+    const payload: Record<string, any> = { fabric_id, transaction_type: type, quantity: txQty,
       quantity_before: before, quantity_after: after,
       reference_no: opts.reference_no ?? "", note: opts.note ?? "", created_by: opts.created_by ?? "",
-      lot_effects: effect };
+      lot_effects: effect, order_id: opts.order_id ?? null };
     let { error: txErr } = await supabase.from("fabric_transactions").insert(payload);
-    // Graceful fallback: if the lot_effects column hasn't been migrated yet, still
-    // record the transaction (it just won't be revertible).
+    // Graceful fallbacks for not-yet-migrated optional columns: drop the offending one(s) and retry.
+    if (txErr && /order_id/i.test(txErr.message)) {
+      delete payload.order_id;
+      ({ error: txErr } = await supabase.from("fabric_transactions").insert(payload));
+    }
     if (txErr && /lot_effects/i.test(txErr.message)) {
-      const { lot_effects, ...rest } = payload;
-      ({ error: txErr } = await supabase.from("fabric_transactions").insert(rest));
+      delete payload.lot_effects;   // records without revert data (as before)
+      ({ error: txErr } = await supabase.from("fabric_transactions").insert(payload));
     }
     if (txErr) return { error: txErr.message };
 

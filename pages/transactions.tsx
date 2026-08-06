@@ -2,6 +2,9 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, addTransaction, revertTransaction, getTransactionsByAccessory, getLotMap, getRecorders, stockFromLots, valueFromLots, type Accessory, type Lot, type Transaction } from "@/lib/store";
 import { useRequireAccess } from "@/lib/auth";
+import { getActiveOrders, statusMeta, type OrderRef } from "@/lib/costing-store";
+import { StockSelect } from "@/lib/stock-select";
+import { Combo } from "@/lib/combo";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { compareAccessory } from "@/lib/sort";
@@ -36,20 +39,9 @@ function RevertLastButton({ disabled, onRevert }: { disabled?: boolean; onRevert
 const DEFAULT_RECORDER = "เตือน";
 
 function RecordedByField({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
-  return (
-    <>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        list="acc-recorders"
-        placeholder={DEFAULT_RECORDER}
-        autoComplete="off"
-      />
-      <datalist id="acc-recorders">
-        {options.map((r) => <option key={r} value={r} />)}
-      </datalist>
-    </>
-  );
+  // Type-or-pick combobox (works reliably on mobile, unlike a native <datalist>): pick a
+  // known recorder from the list or type a new name.
+  return <Combo value={value} onChange={onChange} options={options} placeholder={DEFAULT_RECORDER} />;
 }
 
 export default function TransactionsPage() {
@@ -73,6 +65,11 @@ export default function TransactionsPage() {
   // filled from transaction history (see RecordedByField / recorders below).
   const [by, setBy] = useState(DEFAULT_RECORDER);
   const [recorders, setRecorders] = useState<string[]>([DEFAULT_RECORDER]);
+  // Phase C — tag this movement to an order. `orderId` links a real order; for an order not
+  // in the system yet, leave it unpicked and put the code in Reference no. Persists like `by`.
+  const [orders, setOrders] = useState<OrderRef[]>([]);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<null | { q: number; after: number | null; order: OrderRef }>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -89,6 +86,8 @@ export default function TransactionsPage() {
     getRecorders()
       .then((names) => setRecorders([DEFAULT_RECORDER, ...names.filter((n) => n !== DEFAULT_RECORDER)]))
       .catch(() => {});
+    // Active orders for the order selector — non-fatal if it fails (tagging stays optional).
+    getActiveOrders().then(setOrders).catch(() => {});
   }, [authed]);
 
   const lotsOf = (id: string) => lotMap.get(id) ?? [];
@@ -178,7 +177,9 @@ export default function TransactionsPage() {
   const searchPg = usePagination(filtered, `search|${search}`);
   const variantPg = usePagination(variantsOfType, `type|${selectedType ?? ""}|${search}`);
 
-  const handleSubmit = async () => {
+  // Validate, then either pop the order preview-confirm (when tagged to an order) or write
+  // straight away (untagged movements behave exactly as before).
+  const handleSubmit = () => {
     if (!selected) return;
     const q = parseFloat(qty);
     if (isNaN(q) || (txType !== "ADJUST" && q <= 0)) { showToast("กรุณาระบุจำนวนที่ถูกต้อง", "error"); return; }
@@ -189,6 +190,18 @@ export default function TransactionsPage() {
     }
     if (txType === "ADJUST" && !lotId) { showToast("กรุณาเลือกล็อตที่ต้องการปรับ", "error"); return; }
 
+    // Resolve which order this movement references: the picked order, OR — if none picked —
+    // an active order whose code exactly matches what's typed in Reference no. If it resolves
+    // to a real order, confirm first; otherwise (untagged, or a pending code) save straight.
+    const resolved = orderId
+      ? orders.find((o) => o.id === orderId) ?? null
+      : (refNo.trim() ? orders.find((o) => o.code.trim() && o.code.trim() === refNo.trim()) ?? null : null);
+    if (resolved) { setPendingConfirm({ q, after: afterQty(), order: resolved }); return; }
+    doWrite(q, null);
+  };
+
+  const doWrite = async (q: number, orderIdToWrite: string | null) => {
+    if (!selected) return;
     setSaving(true);
     const result = await addTransaction({
       accessory_id: selected.id,
@@ -199,14 +212,17 @@ export default function TransactionsPage() {
       return_position: txType === "RETURN" ? returnPos : undefined,
       return_date: txType === "RETURN" && returnPos === "date" ? returnDate : undefined,
       reference_no: refNo, note, created_by: by,
+      order_id: orderIdToWrite,
     });
     setSaving(false);
+    setPendingConfirm(null);
     if ("error" in result) { showToast(result.error, "error"); return; }
     showToast(`✓ บันทึกแล้ว — ${TX_LABELS[txType].th} ${q} ${selected.unit}`, "success");
     // Refresh lots + items and update selected
     const [fresh, lm] = await Promise.all([getAccessories(), getLotMap()]);
     setItems(fresh); setLotMap(lm);
     setSelected(fresh.find((a) => a.id === selected.id) ?? null);
+    // Keep the order selection (a recording session is usually one order, like `by`).
     setQty(""); setPrice(""); setRefNo(""); setNote(""); setLotId(""); setManualLot(false);
   };
 
@@ -490,8 +506,22 @@ export default function TransactionsPage() {
           )}
 
           <div className="form-row">
+            <label className="form-label">ผูกกับออเดอร์ · Order (ถ้ามี)</label>
+            <StockSelect
+              value={orderId}
+              onChange={(id) => setOrderId(id || null)}
+              options={orders}
+              placeholder="— ไม่ผูกออเดอร์ —"
+              formatRight={(o) => statusMeta((o as any).status ?? "").th}
+            />
+            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
+              หรือพิมพ์รหัสออเดอร์ในช่อง “เลขที่อ้างอิง” ด้านล่าง — ถ้าตรงกับออเดอร์ในระบบจะขึ้นให้ยืนยันและผูกให้อัตโนมัติ (ถ้ายังไม่มีในระบบ จะเก็บไว้เชื่อมภายหลัง)
+            </div>
+          </div>
+
+          <div className="form-row">
             <label className="form-label">เลขที่อ้างอิง · Reference no.</label>
-            <input placeholder="เลขที่ใบสั่งซื้อ / Job no. …" value={refNo} onChange={(e) => setRefNo(e.target.value)} />
+            <input placeholder="เลขที่ใบสั่งซื้อ / Job no. / รหัสออเดอร์ …" value={refNo} onChange={(e) => setRefNo(e.target.value)} />
           </div>
           <div className="form-row">
             <label className="form-label">หมายเหตุ · Note</label>
@@ -555,6 +585,52 @@ export default function TransactionsPage() {
               <button onClick={() => setRevertTx(null)}>ยกเลิก</button>
               <button className="danger" onClick={confirmRevert} disabled={reverting}>
                 {reverting ? "กำลังย้อน…" : "ยืนยันการย้อน"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order-tag preview-confirm — shows the order you're about to link before committing. */}
+      {pendingConfirm && selected && (
+        <div className="modal-overlay" onClick={() => setPendingConfirm(null)}>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight: 500 }}>ยืนยันบันทึก & ผูกออเดอร์</div>
+              <button className="ghost" style={{ padding: "4px 8px" }} onClick={() => setPendingConfirm(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ background: "var(--bg3)", borderRadius: "var(--r)", padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 4 }}>ออเดอร์{!orderId ? " (จับคู่จากเลขที่อ้างอิง)" : ""}</div>
+                <div style={{ fontWeight: 500 }}>{pendingConfirm.order.label || "—"}</div>
+                <div style={{ fontSize: 13, marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ color: statusMeta(pendingConfirm.order.status).color }}>{statusMeta(pendingConfirm.order.status).th}</span>
+                  {pendingConfirm.order.due_date && <span style={{ color: "var(--text2)" }}>กำหนดส่ง {new Date(pendingConfirm.order.due_date).toLocaleDateString("th-TH")}</span>}
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ color: "var(--text2)" }}>{TX_LABELS[txType].th} · {TX_LABELS[txType].en}</span>
+                <span style={{ fontFamily: "var(--mono)", fontWeight: 500 }}>{pendingConfirm.q.toLocaleString()} {selected.unit}</span>
+              </div>
+              <div style={{ fontSize: 14, color: "var(--text2)", marginBottom: 8 }}>
+                {[selected.type, selected.description, selected.color, selected.size].filter(Boolean).join(" · ")}
+              </div>
+              {pendingConfirm.after !== null && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+                  <span style={{ color: "var(--text3)" }}>สต็อค</span>
+                  <span style={{ fontFamily: "var(--mono)" }}>{stockOf(selected.id).toLocaleString()}</span>
+                  <span style={{ color: "var(--text3)" }}>→</span>
+                  <span style={{ fontFamily: "var(--mono)", fontWeight: 500, color: pendingConfirm.after < 0 ? "var(--red)" : "var(--text)" }}>
+                    {pendingConfirm.after.toLocaleString()}
+                  </span>
+                  <span style={{ color: "var(--text3)" }}>{selected.unit}</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setPendingConfirm(null)}>ยกเลิก</button>
+              <button className="primary" onClick={() => doWrite(pendingConfirm.q, pendingConfirm.order.id)} disabled={saving}>
+                {saving ? "กำลังบันทึก…" : "ยืนยันบันทึก"}
               </button>
             </div>
           </div>
