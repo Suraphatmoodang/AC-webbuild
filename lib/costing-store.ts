@@ -63,9 +63,10 @@ import { getFabrics, getFabricLotMap } from "./fabric-store";
 //     -- cost inputs
 //     fabric_lines jsonb not null default '[]',
 //     extras jsonb not null default '[]',
-//     sew_labor numeric not null default 0,    -- labor: เช็ค (repurposed; was เย็บ)
-//     cut_labor numeric not null default 0,     -- labor: ตัด
-//     pack_labor numeric not null default 0,    -- labor: แพ็ค
+//     sew_labor numeric not null default 0,    -- labor: QC (เช็ค) — pre-existing column
+//     cut_labor numeric not null default 0,     -- labor: ตัด (cut)
+//     qc_labor numeric not null default 0,      -- labor: เย็บ (sew) — NEW; add via: alter table product_costings add column qc_labor numeric not null default 0
+//     pack_labor numeric not null default 0,    -- labor: แพ็ค (pack)
 //     output_day numeric not null default 0,    -- LEGACY (overhead used to be ÷ this); unused, kept for old rows
 //     waste_pct numeric not null default 3,
 //     overhead_baht numeric not null default 8000, -- LEGACY (was โสหุ้ย/วัน); unused, kept for old rows
@@ -123,8 +124,12 @@ export type FabricLine = {
 //   · "flat" → a single per-piece baht amount (`amount`) — good for printing / packing
 //   · "qty"  → `qty_per_pc × unit_price` in `unit` — good for counted trims (ซิป, กระดุม)
 // Old rows have no `mode` and are treated as "flat" (they only carry `amount`).
+//   · label = the item's short name (ซิป, พิมพ์…) — kept short so linking back to stock is easy
+//   · desc  = a fuller free-text description for later reference (composition, spec, stock name);
+//             auto-filled from the picked อุปกรณ์ but editable. Purely descriptive — the hard link
+//             to stock is `accessory_id`, so a long desc never affects matching. (JSONB, no migration.)
 export type ExtraLine = {
-  label: string; accessory_id: string | null;
+  label: string; desc: string; accessory_id: string | null;
   mode: "flat" | "qty"; amount: number; qty_per_pc: number; unit: string; unit_price: number;
 };
 // Per-line cost, honoring the mode (old rows with no mode fall back to the flat amount).
@@ -190,9 +195,10 @@ export type ProductCosting = {
   iron_count: number;
   fabric_lines: FabricLine[];
   extras: ExtraLine[];
-  sew_labor: number;   // labor: เช็ค (repurposed; was เย็บ)
-  cut_labor: number;   // labor: ตัด
-  pack_labor: number;  // labor: แพ็ค
+  sew_labor: number;   // labor: QC (เช็ค) — pre-existing column
+  cut_labor: number;   // labor: ตัด (cut)
+  qc_labor: number;    // labor: เย็บ (sew) — new column
+  pack_labor: number;  // labor: แพ็ค (pack)
   output_day: number;    // LEGACY, unused (overhead is now typed per-piece)
   waste_pct: number;
   overhead_baht: number; // LEGACY, unused
@@ -217,7 +223,7 @@ export type CostingInput = Omit<ProductCosting, "id" | "created_at" | "updated_a
 //   · fabric  = Σ(total yards × price/yard) ÷ order_qty × (1 + cutting-loss%)
 //   · material = fabric + Σ(total trims/print/packaging ÷ order_qty)
 //   · waste    = material × waste%
-//   · labor    = ตัด + เช็ค + แพ็ค   (already per piece)
+//   · labor    = ตัด + เย็บ + QC + แพ็ค   (already per piece)
 //   · overhead = โสหุ้ย/ตัว (typed directly per piece)
 //   · total    = material + waste + labor + overhead
 //   · profit   = margin ON THE PRICE:  total ÷ (1 − margin%) − total
@@ -237,8 +243,9 @@ export type CostBreakdown = {
 export function computeCosting(c: {
   fabric_lines: FabricLine[];
   extras: ExtraLine[];
-  sew_labor: number;   // เช็ค
+  sew_labor: number;   // QC (เช็ค)
   cut_labor: number;   // ตัด
+  qc_labor: number;    // เย็บ
   pack_labor: number;  // แพ็ค
   waste_pct: number;
   overhead_pc: number; // โสหุ้ย/ตัว (typed directly)
@@ -256,7 +263,7 @@ export function computeCosting(c: {
   const extrasSum = c.extras.reduce((s, e) => s + extraLineCost(e), 0) * perPc;
   const materialSubtotal = fabricPerPc + extrasSum;
   const wasteCost = materialSubtotal * (num(c.waste_pct) / 100);
-  const laborTotal = num(c.cut_labor) + num(c.sew_labor) + num(c.pack_labor);   // ตัด + เช็ค + แพ็ค
+  const laborTotal = num(c.cut_labor) + num(c.sew_labor) + num(c.qc_labor) + num(c.pack_labor);   // ตัด + เย็บ + QC + แพ็ค
   const overheadPerPc = num(c.overhead_pc);
   const totalCost = materialSubtotal + wasteCost + laborTotal + overheadPerPc;
   const denom = 1 - num(c.profit_pct) / 100;
@@ -268,11 +275,11 @@ export function computeCosting(c: {
 // Whether any cost input has been entered — used to show "—" instead of ฿0.00
 // for orders that are logged but not yet costed (costing is optional).
 export function hasCosting(c: {
-  fabric_lines: FabricLine[]; extras: ExtraLine[]; sew_labor: number; cut_labor: number; pack_labor: number;
+  fabric_lines: FabricLine[]; extras: ExtraLine[]; sew_labor: number; cut_labor: number; qc_labor: number; pack_labor: number;
 }): boolean {
   const fab = c.fabric_lines.some((f) => Number(f.yard_per_pc) > 0 && Number(f.price_per_yard) > 0);
   const ex = c.extras.some((e) => extraLineCost(e) > 0);
-  return fab || ex || Number(c.sew_labor) > 0 || Number(c.cut_labor) > 0 || Number(c.pack_labor) > 0;
+  return fab || ex || Number(c.sew_labor) > 0 || Number(c.cut_labor) > 0 || Number(c.qc_labor) > 0 || Number(c.pack_labor) > 0;
 }
 
 // ── CRUD ─────────────────────────────────────────────────────────────

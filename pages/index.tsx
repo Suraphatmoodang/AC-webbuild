@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
-import { getAccessories, getLotMap, valueFromLots as accValue } from "@/lib/store";
-import { getFabrics, getFabricLotMap, valueFromLots as fabValue, SELF_OWNER } from "@/lib/fabric-store";
+import { getAccessoryValueRows, getLotValueMap, valueFromLots as accValue } from "@/lib/store";
+import { getFabricValueRows, getFabricLotValueMap, valueFromLots as fabValue, SELF_OWNER } from "@/lib/fabric-store";
 import { useSession, endSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
 
 // Section picker. The two stock systems (อุปกรณ์ / ผ้า) are fully independent —
@@ -53,7 +53,7 @@ export default function HomePage() {
   useEffect(() => {
     // Each side loads independently: a missing/empty fabric table must not stop
     // the accessory card from rendering (and vice versa), so no Promise.all here.
-    Promise.all([getAccessories(), getLotMap()])
+    Promise.all([getAccessoryValueRows(), getLotValueMap()])
       .then(([items, lm]) => {
         // Group value + item count by customer (blank → NO_CUSTOMER), high value first.
         const by = new Map<string, Grouped>();
@@ -72,7 +72,7 @@ export default function HomePage() {
       })
       .catch(() => setAcc({ items: 0, value: 0 }));
 
-    Promise.all([getFabrics(), getFabricLotMap()])
+    Promise.all([getFabricValueRows(), getFabricLotValueMap()])
       .then(([items, lm]) => {
         // Mirror of the accessory card: group value + item count by owner (blank = ours → AC),
         // high value first; also keep the external (other-factory) total broken out separately.

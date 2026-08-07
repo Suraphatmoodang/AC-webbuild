@@ -203,6 +203,7 @@ export function sheetRowToCostingInput(r: CostingSheetRow, created_by: string): 
     extras: [],
     sew_labor: 0,
     cut_labor: 0,
+    qc_labor: 0,
     pack_labor: 0,
     output_day: 0,
     waste_pct: 3,

@@ -770,12 +770,53 @@ export async function getLotMap(): Promise<Map<string, Lot[]>> {
   return map;
 }
 
-// Derive total stock and value for an accessory from its lots.
-export function stockFromLots(lots: Lot[]): number {
+// Derive total stock and value for an accessory from its lots. Typed to the minimal
+// shape the math reads (not the full Lot), so narrow-column reads — e.g. the landing
+// page's value summary — can reuse the exact same computation. A full Lot[] still fits.
+export function stockFromLots(lots: { quantity_remaining: number }[]): number {
   return lots.reduce((s, l) => s + Number(l.quantity_remaining), 0);
 }
-export function valueFromLots(lots: Lot[]): number {
+export function valueFromLots(lots: { quantity_remaining: number; unit_cost: number }[]): number {
   return lots.reduce((s, l) => s + Number(l.quantity_remaining) * Number(l.unit_cost), 0);
+}
+
+// ── Landing-page value summary (narrow reads) ────────────────────────
+// The section picker only needs each item's id + customer and the two lot columns the
+// value math uses — not whole rows. These fetch just those columns so the most-visited
+// page stops pulling the entire inventory + every lot column on each load. Same math,
+// same numbers as getAccessories + getLotMap, a fraction of the bytes.
+export type ValueLot = { quantity_remaining: number; unit_cost: number };
+
+export async function getAccessoryValueRows(): Promise<{ id: string; customer: string }[]> {
+  const all: { id: string; customer: string }[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("accessories").select("id, customer").order("id").range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as any[]).map((a) => ({ id: a.id, customer: a.customer ?? "" })));
+    if (data.length < PAGE) break;
+  }
+  return all;
+}
+
+export async function getLotValueMap(): Promise<Map<string, ValueLot[]>> {
+  const map = new Map<string, ValueLot[]>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("accessory_lots").select("accessory_id, quantity_remaining, unit_cost").order("id").range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    for (const l of data as any[]) {
+      const arr = map.get(l.accessory_id) ?? [];
+      arr.push({ quantity_remaining: Number(l.quantity_remaining), unit_cost: Number(l.unit_cost) });
+      map.set(l.accessory_id, arr);
+    }
+    if (data.length < PAGE) break;
+  }
+  return map;
 }
 
 // Create a new lot (used by IN, RETURN, MIGRATION).

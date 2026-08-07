@@ -47,11 +47,11 @@ type FabricLineF = {
 type ActualEntryF = { date: string; category: string; label: string; amount: string; note: string };
 const emptyActual = (): ActualEntryF => ({ date: new Date().toISOString().split("T")[0], category: "material", label: "", amount: "", note: "" });
 type ExtraLineF = {
-  label: string; accessory_id: string | null;
+  label: string; desc: string; accessory_id: string | null;
   mode: "flat" | "qty"; amount: string; qty_per_pc: string; unit: string; unit_price: string;
 };
 const emptyExtra = (p: Partial<ExtraLineF> = {}): ExtraLineF => ({
-  label: "", accessory_id: null, mode: "flat", amount: "", qty_per_pc: "", unit: "ชิ้น", unit_price: "", ...p,
+  label: "", desc: "", accessory_id: null, mode: "flat", amount: "", qty_per_pc: "", unit: "ชิ้น", unit_price: "", ...p,
 });
 
 type FormState = {
@@ -67,8 +67,9 @@ type FormState = {
   embroidery_count: string; print_count: string; sublimation: string; iron_count: string;
   fabric_lines: FabricLineF[];
   extras: ExtraLineF[];
-  // labor buckets: ตัด / เช็ค / แพ็ค. sew_labor holds เช็ค (repurposed from the old เย็บ).
-  cut_labor: string; sew_labor: string; pack_labor: string;
+  // labor buckets: ตัด / เย็บ / QC / แพ็ค — each per piece, all summed into laborTotal.
+  // sew_labor holds QC (เช็ค, pre-existing column); qc_labor holds เย็บ (new column).
+  cut_labor: string; sew_labor: string; qc_labor: string; pack_labor: string;
   output_day: string;      // LEGACY, hidden — carried through so old rows keep the value
   waste_pct: string; overhead_baht: string; overhead_pc: string; profit_pct: string; cutting_loss_pct: string;
   actual_entries: ActualEntryF[];
@@ -88,7 +89,7 @@ const emptyForm = (): FormState => ({
   embroidery_count: "", print_count: "", sublimation: "", iron_count: "",
   fabric_lines: [],
   extras: [],
-  cut_labor: "", sew_labor: "", pack_labor: "", output_day: "",
+  cut_labor: "", sew_labor: "", qc_labor: "", pack_labor: "", output_day: "",
   waste_pct: "3", overhead_baht: "8000", overhead_pc: "", profit_pct: "10", cutting_loss_pct: "5",
   actual_entries: [],
   note: "",
@@ -131,11 +132,11 @@ function fromCosting(c: any): FormState {
       unit: f.unit || "หลา", yard_per_pc: s(f.yard_per_pc), price_per_yard: s(f.price_per_yard),
     })),
     extras: (c.extras ?? []).map((e: any) => ({
-      label: e.label ?? "", accessory_id: e.accessory_id ?? null,
+      label: e.label ?? "", desc: e.desc ?? "", accessory_id: e.accessory_id ?? null,
       mode: e.mode === "qty" ? "qty" : "flat",
       amount: s(e.amount), qty_per_pc: s(e.qty_per_pc), unit: e.unit || "ชิ้น", unit_price: s(e.unit_price),
     })),
-    cut_labor: s(c.cut_labor), sew_labor: s(c.sew_labor), pack_labor: s(c.pack_labor), output_day: s(c.output_day),
+    cut_labor: s(c.cut_labor), sew_labor: s(c.sew_labor), qc_labor: s(c.qc_labor), pack_labor: s(c.pack_labor), output_day: s(c.output_day),
     waste_pct: s(c.waste_pct), overhead_baht: s(c.overhead_baht), overhead_pc: legacyOverheadPc(c), profit_pct: s(c.profit_pct),
     cutting_loss_pct: s(c.cutting_loss_pct),
     actual_entries: (c.actual_entries ?? []).map((e: any) => ({
@@ -168,11 +169,11 @@ function toInput(f: FormState, role: Role | null): CostingInput {
       unit: l.unit || "หลา", yard_per_pc: n(l.yard_per_pc), price_per_yard: n(l.price_per_yard),
     })),
     extras: f.extras.map((e) => ({
-      label: e.label.trim(), accessory_id: e.accessory_id,
+      label: e.label.trim(), desc: e.desc.trim(), accessory_id: e.accessory_id,
       mode: e.mode === "qty" ? "qty" as const : "flat" as const,
       amount: n(e.amount), qty_per_pc: n(e.qty_per_pc), unit: e.unit || "ชิ้น", unit_price: n(e.unit_price),
     })),
-    cut_labor: n(f.cut_labor), sew_labor: n(f.sew_labor), pack_labor: n(f.pack_labor), output_day: n(f.output_day),
+    cut_labor: n(f.cut_labor), sew_labor: n(f.sew_labor), qc_labor: n(f.qc_labor), pack_labor: n(f.pack_labor), output_day: n(f.output_day),
     waste_pct: n(f.waste_pct), overhead_baht: n(f.overhead_baht), overhead_pc: n(f.overhead_pc), profit_pct: n(f.profit_pct),
     cutting_loss_pct: n(f.cutting_loss_pct),
     actual_entries: f.actual_entries.map((e) => ({
@@ -385,6 +386,7 @@ export default function CostingEditor() {
     if (!opt) { updExtra(i, { accessory_id: null }); return; }
     updExtra(i, {
       accessory_id: opt.id, label: form.extras[i].label || opt.label,
+      // Description is left blank on link — the user fills it in themselves for reference.
       mode: "qty", unit: opt.unit || "ชิ้น", unit_price: String(round2(opt.price)),
     });
   };
@@ -438,13 +440,15 @@ export default function CostingEditor() {
   if (authed !== true) return null;
   if (loading) return <div style={{ padding: 40, color: "var(--text3)" }}>กำลังโหลด…</div>;
 
+  // Each row carries its per-piece value; the summary table renders both that and the
+  // order total (per-piece × จำนวนสั่ง) side by side, so "8790 total ⇄ 4.83/ตัว" is unambiguous.
   const breakdownRows: [string, number][] = [
-    ["ค่าผ้า / ตัว", bd.fabricPerPc],
-    ["ค่าตกแต่ง/พิมพ์/แพ็ค / ตัว", bd.extrasSum],
+    ["ค่าผ้า", bd.fabricPerPc],
+    ["ค่าตกแต่ง/พิมพ์/แพ็ค", bd.extrasSum],
     ["รวมวัตถุดิบ", bd.materialSubtotal],
     [`เผื่อเสีย (${form.waste_pct || 0}%)`, bd.wasteCost],
-    ["ค่าแรง (ตัด+เช็ค+แพ็ค)", bd.laborTotal],
-    ["โสหุ้ย / ตัว", bd.overheadPerPc],
+    ["ค่าแรง (ตัด+เย็บ+QC+แพ็ค)", bd.laborTotal],
+    ["โสหุ้ย", bd.overheadPerPc],
   ];
 
   // ── Per-order material ledger rows ──
@@ -464,7 +468,7 @@ export default function CostingEditor() {
     ...form.extras.filter((e) => e.mode === "qty").map((e): MatRow => {
       const flow = e.accessory_id ? flows.acc.get(e.accessory_id) : undefined;
       return {
-        name: e.label.trim() || "อุปกรณ์",
+        name: [e.label.trim(), e.desc.trim()].filter(Boolean).join(" · ") || "อุปกรณ์",
         unit: e.unit || "ชิ้น", planned: n(e.qty_per_pc), linked: !!e.accessory_id,
         received: flow?.received ?? 0, used: flow?.used ?? 0,
       };
@@ -522,10 +526,11 @@ export default function CostingEditor() {
               <Field label="Style no."><input value={form.style_no} onChange={(e) => set("style_no", e.target.value)} /></Field>
               <Field label="ยี่ห้อ"><input value={form.brand} onChange={(e) => set("brand", e.target.value)} /></Field>
               <Field label="Season"><input value={form.season} onChange={(e) => set("season", e.target.value)} /></Field>
-              <Field label="ที่อยู่จัดส่ง"><input value={form.shipment} onChange={(e) => set("shipment", e.target.value)} /></Field>
             </div>
-            <div style={{ marginTop: 12 }}>
+            {/* รายละเอียด + ที่อยู่จัดส่ง share one wide row — both are free-text and benefit from length. */}
+            <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 12 }}>
               <Field label="รายละเอียด"><input value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>
+              <Field label="ที่อยู่จัดส่ง"><input value={form.shipment} onChange={(e) => set("shipment", e.target.value)} /></Field>
             </div>
             {/* Code / tags — framework fields. Assignable per-order now; a bulk
                 "retroactively tag existing orders" tool is planned but not built yet. */}
@@ -680,14 +685,15 @@ export default function CostingEditor() {
                       />
                       <input style={{ marginTop: 6 }} value={l.fabric_type} onChange={(e) => updFabricLine(i, { fabric_type: e.target.value })} placeholder="เช่น 60% cotton 40% spandex" />
                       {linked && (() => {
-                        // Show current on-hand stock for the linked fabric (after selection only — the
-                        // dropdown list stays uncrowded). Falls back silently if the option isn't loaded.
+                        // Reference the linked fabric's live stock + current price (after selection only —
+                        // the dropdown list stays uncrowded). Falls back silently if the option isn't loaded.
                         const opt = prices.fabrics.find((o) => o.id === l.fabric_id);
                         if (!opt) return null;
                         return (
                           <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
                             คงเหลือในสต็อค: <b style={{ fontFamily: "var(--mono)", color: opt.stock > 0 ? "var(--text2)" : "var(--red)" }}>
                               {opt.stock.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b> {opt.unit}
+                            {opt.price > 0 && <> · ราคาปัจจุบัน <b style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>฿{round2(opt.price)}</b>/{opt.unit}</>}
                           </div>
                         );
                       })()}
@@ -700,9 +706,7 @@ export default function CostingEditor() {
                       </span>
                     </div>
                   </div>
-                  <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
-                    <Field label="หน้าที่ใช้"><input value={l.label} onChange={(e) => updFabricLine(i, { label: e.target.value })} placeholder="เช่น ตัวเสื้อ / ปก" /></Field>
-                    <Field label="เลขที่"><input value={l.code} onChange={(e) => updFabricLine(i, { code: e.target.value })} placeholder="เช่น 192" /></Field>
+                  <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 10 }}>
                     <Field label="สี"><input value={l.color} onChange={(e) => updFabricLine(i, { color: e.target.value })} placeholder="เช่น กรม" /></Field>
                     <Field label="หน้าผ้า"><input value={l.width} onChange={(e) => updFabricLine(i, { width: e.target.value })} placeholder={'เช่น 60" / 32T'} /></Field>
                     <Field label="จำนวนรวม (ทั้งออเดอร์)">
@@ -749,14 +753,16 @@ export default function CostingEditor() {
                         formatRight={(o) => (o.price ? `฿${round2(o.price)}/${o.unit}` : "")}
                       />
                       <input style={{ marginTop: 6 }} value={e.label} title={e.label} onChange={(ev) => updExtra(i, { label: ev.target.value })} placeholder="ชื่อรายการ เช่น ซิป, พิมพ์" />
+                      <input style={{ marginTop: 6 }} value={e.desc} title={e.desc} onChange={(ev) => updExtra(i, { desc: ev.target.value })} placeholder="รายละเอียด (สเปค/รุ่น/สี) — ไว้อ้างอิงภายหลัง" />
                       {linked && (() => {
-                        // On-hand stock for the linked accessory, shown only after selection.
+                        // Reference the linked accessory's live stock + current price, shown only after selection.
                         const opt = prices.accessories.find((o) => o.id === e.accessory_id);
                         if (!opt) return null;
                         return (
                           <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
                             คงเหลือในสต็อค: <b style={{ fontFamily: "var(--mono)", color: opt.stock > 0 ? "var(--text2)" : "var(--red)" }}>
                               {opt.stock.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b> {opt.unit}
+                            {opt.price > 0 && <> · ราคาปัจจุบัน <b style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>฿{round2(opt.price)}</b>/{opt.unit}</>}
                           </div>
                         );
                       })()}
@@ -770,7 +776,7 @@ export default function CostingEditor() {
                     </div>
                   </div>
                   {/* Second row: cost mode + amounts, in a grid like the fabric card. */}
-                  <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
+                  <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 10 }}>
                     <Field label="รูปแบบ">
                       <select value={e.mode} onChange={(ev) => updExtra(i, { mode: ev.target.value === "qty" ? "qty" : "flat" })}>
                         <option value="flat">เหมา (บาทรวม)</option>
@@ -812,10 +818,12 @@ export default function CostingEditor() {
           </SectionCard>
 
           <SectionCard title="ค่าแรง">
-            <div className="form-grid form-grid-3">
-              <Field label="ค่าแรงตัด / ตัว"><input inputMode="decimal" value={form.cut_labor} onChange={(e) => set("cut_labor", e.target.value)} placeholder="0" /></Field>
-              <Field label="ค่าแรงเช็ค / ตัว"><input inputMode="decimal" value={form.sew_labor} onChange={(e) => set("sew_labor", e.target.value)} placeholder="0" /></Field>
-              <Field label="ค่าแรงแพ็ค / ตัว"><input inputMode="decimal" value={form.pack_labor} onChange={(e) => set("pack_labor", e.target.value)} placeholder="0" /></Field>
+            <div className="form-grid form-grid-4" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <Field label="ค่าตัด / ตัว"><input inputMode="decimal" value={form.cut_labor} onChange={(e) => set("cut_labor", e.target.value)} placeholder="0" /></Field>
+              {/* เย็บ is the NEW bucket → new qc_labor column; QC (เช็ค) is the pre-existing sew_labor column. */}
+              <Field label="ค่าเย็บ / ตัว"><input inputMode="decimal" value={form.qc_labor} onChange={(e) => set("qc_labor", e.target.value)} placeholder="0" /></Field>
+              <Field label="ค่า QC / ตัว"><input inputMode="decimal" value={form.sew_labor} onChange={(e) => set("sew_labor", e.target.value)} placeholder="0" /></Field>
+              <Field label="ค่าแพ็ค / ตัว"><input inputMode="decimal" value={form.pack_labor} onChange={(e) => set("pack_labor", e.target.value)} placeholder="0" /></Field>
             </div>
           </SectionCard>
 
@@ -965,27 +973,40 @@ export default function CostingEditor() {
         <div className="card" style={{ padding: 20, marginTop: 4 }}>
           <h2 style={{ fontSize: 16, fontWeight: 500, color: "var(--text2)", marginBottom: 16 }}>สรุปต้นทุน (สด)</h2>
           <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "flex-start", justifyContent: "center" }}>
-            {/* Itemized sheet */}
-            <div style={{ flex: "1 1 360px", maxWidth: 480 }}>
+            {/* Itemized sheet — two value columns: per garment and order total (× จำนวนสั่ง). */}
+            <div style={{ flex: "1 1 420px", maxWidth: 560 }}>
               <table style={{ fontSize: 14, width: "100%" }}>
+                <thead>
+                  <tr style={{ color: "var(--text3)", fontSize: 12 }}>
+                    <th style={{ border: "none", padding: "0 0 6px", textAlign: "left", fontWeight: 400 }}>รายการ</th>
+                    <th style={{ border: "none", padding: "0 0 6px", textAlign: "right", fontWeight: 400 }}>/ ตัว</th>
+                    <th style={{ border: "none", padding: "0 0 6px", textAlign: "right", fontWeight: 400 }}>
+                      รวมทั้งออเดอร์{orderQty > 0 ? ` (× ${orderQty.toLocaleString()})` : ""}
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   {breakdownRows.map(([label, val]) => (
                     <tr key={label}>
                       <td style={{ border: "none", padding: "6px 0", color: "var(--text2)" }}>{label}</td>
                       <td className="num" style={{ border: "none", padding: "6px 0", textAlign: "right" }}>{fmt(val)}</td>
+                      <td className="num" style={{ border: "none", padding: "6px 0", textAlign: "right", color: "var(--text2)" }}>{orderQty > 0 ? fmt(val * orderQty) : "—"}</td>
                     </tr>
                   ))}
                   <tr>
-                    <td style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600 }}>ต้นทุนรวม / ตัว</td>
+                    <td style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600 }}>ต้นทุนรวม</td>
                     <td className="num" style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600, fontSize: 15, textAlign: "right" }}>{fmt(bd.totalCost)}</td>
+                    <td className="num" style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600, fontSize: 15, textAlign: "right" }}>{orderQty > 0 ? fmt(bd.totalCost * orderQty) : "—"}</td>
                   </tr>
                   <tr>
                     <td style={{ border: "none", padding: "6px 0", color: "var(--green)" }}>กำไร ({form.profit_pct || 0}%)</td>
                     <td className="num" style={{ border: "none", padding: "6px 0", color: "var(--green)", textAlign: "right" }}>{fmt(bd.profit)}</td>
+                    <td className="num" style={{ border: "none", padding: "6px 0", color: "var(--green)", textAlign: "right" }}>{orderQty > 0 ? fmt(bd.profit * orderQty) : "—"}</td>
                   </tr>
                   <tr>
-                    <td style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)" }}>ราคาขาย / ตัว</td>
+                    <td style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)" }}>ราคาขาย</td>
                     <td className="num" style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)", fontSize: 17, textAlign: "right" }}>{fmt(bd.sellingPrice)}</td>
+                    <td className="num" style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)", fontSize: 17, textAlign: "right" }}>{orderQty > 0 ? fmt(bd.sellingPrice * orderQty) : "—"}</td>
                   </tr>
                 </tbody>
               </table>
