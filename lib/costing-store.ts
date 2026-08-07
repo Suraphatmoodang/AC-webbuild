@@ -209,12 +209,15 @@ export type ProductCosting = {
 export type CostingInput = Omit<ProductCosting, "id" | "created_at" | "updated_at">;
 
 // ── The costing math ─────────────────────────────────────────────────
-// Per-piece, adapted from the GKM spreadsheet but generalised:
-//   · fabric  = Σ(yard/pc × price/yard) × (1 + cutting-loss%)   — clean per-piece,
-//               no divide-by-order-qty (the GKM sheet's yard field was really total)
-//   · material = fabric + Σ trims/print/packaging (each already per piece)
+// Fabric qty and the trim/print/packaging (extras) are keyed as ORDER TOTALS — that's
+// how the shop actually records them — so they're divided by จำนวนสั่ง (order_qty) to get
+// the per-piece figures the sheet is built on. Labor and โสหุ้ย are already typed per piece.
+// With no order_qty yet, those total-based terms can't be split, so they contribute 0
+// (the per-piece cost / selling price read as ฿0 until a quantity is entered).
+//   · fabric  = Σ(total yards × price/yard) ÷ order_qty × (1 + cutting-loss%)
+//   · material = fabric + Σ(total trims/print/packaging ÷ order_qty)
 //   · waste    = material × waste%
-//   · labor    = ตัด + เช็ค + แพ็ค
+//   · labor    = ตัด + เช็ค + แพ็ค   (already per piece)
 //   · overhead = โสหุ้ย/ตัว (typed directly per piece)
 //   · total    = material + waste + labor + overhead
 //   · profit   = margin ON THE PRICE:  total ÷ (1 − margin%) − total
@@ -241,11 +244,16 @@ export function computeCosting(c: {
   overhead_pc: number; // โสหุ้ย/ตัว (typed directly)
   profit_pct: number;
   cutting_loss_pct: number;
+  order_qty: number;   // fabric qty & extras are ORDER TOTALS → divided by this to per-piece
 }): CostBreakdown {
   const num = (v: any) => (isFinite(Number(v)) ? Number(v) : 0);
-  const fabricRaw = c.fabric_lines.reduce((s, f) => s + num(f.yard_per_pc) * num(f.price_per_yard), 0);
+  // Fabric qty & extras are keyed as totals for the whole order; convert to per-piece by
+  // dividing by จำนวนสั่ง. No order qty yet → perPc 0, so those terms drop to 0 (can't split).
+  const qty = num(c.order_qty);
+  const perPc = qty > 0 ? 1 / qty : 0;
+  const fabricRaw = c.fabric_lines.reduce((s, f) => s + num(f.yard_per_pc) * num(f.price_per_yard), 0) * perPc;
   const fabricPerPc = fabricRaw * (1 + num(c.cutting_loss_pct) / 100);
-  const extrasSum = c.extras.reduce((s, e) => s + extraLineCost(e), 0);
+  const extrasSum = c.extras.reduce((s, e) => s + extraLineCost(e), 0) * perPc;
   const materialSubtotal = fabricPerPc + extrasSum;
   const wasteCost = materialSubtotal * (num(c.waste_pct) / 100);
   const laborTotal = num(c.cut_labor) + num(c.sew_labor) + num(c.pack_labor);   // ตัด + เช็ค + แพ็ค
@@ -337,7 +345,7 @@ export async function deleteCosting(id: string): Promise<void> {
 // `label`/`unit`/`price` are common to both sides; the extra spec fields are set for
 // fabrics only, so a picked fabric can auto-fill เลขที่/ชนิดผ้า/สี/หน้าผ้า on the costing line.
 export type PriceOption = {
-  id: string; label: string; unit: string; price: number;
+  id: string; label: string; unit: string; price: number; stock: number;
   code?: string; fabric_type?: string; color?: string; width?: string;
 };
 
@@ -349,6 +357,12 @@ function avgCost(lots: { quantity_remaining: number; unit_cost: number }[] | und
   return val / qty;
 }
 
+// Current on-hand stock = Σ remaining across the item's lots (0 when out of stock / no lots).
+function stockQty(lots: { quantity_remaining: number }[] | undefined): number {
+  if (!lots || lots.length === 0) return 0;
+  return lots.reduce((s, l) => s + Number(l.quantity_remaining), 0);
+}
+
 async function loadAccessoryPrices(): Promise<PriceOption[]> {
   // ALL items (not active-only) so this matches what /stock lists.
   const [accs, accLots] = await Promise.all([getAccessories(), getLotMap()]);
@@ -358,6 +372,7 @@ async function loadAccessoryPrices(): Promise<PriceOption[]> {
       label: [a.type, a.description, a.color, a.size].filter((x) => String(x).trim()).join(" · "),
       unit: a.unit,
       price: avgCost(accLots.get(a.id), Number(a.unit_cost) || 0),
+      stock: stockQty(accLots.get(a.id)),
     }))
     .sort((x, y) => x.label.localeCompare(y.label, "th"));
 }
@@ -370,6 +385,7 @@ async function loadFabricPrices(): Promise<PriceOption[]> {
       label: [f.fabric_code, f.fabric_type, f.color, f.width].filter((x) => String(x).trim()).join(" · "),
       unit: f.cost_unit || f.unit,
       price: avgCost(fabLots.get(f.id), Number(f.unit_cost) || 0),
+      stock: stockQty(fabLots.get(f.id)),
       code: f.fabric_code ?? "",
       fabric_type: f.fabric_type ?? "",
       color: f.color ?? "",

@@ -457,7 +457,7 @@ export default function CostingEditor() {
       const flow = l.fabric_id ? flows.fab.get(l.fabric_id) : undefined;
       return {
         name: [l.label, l.fabric_type, l.color].map((x) => x.trim()).filter(Boolean).join(" · ") || l.code.trim() || "ผ้า",
-        unit: l.unit || "หลา", planned: n(l.yard_per_pc) * orderQty, linked: !!l.fabric_id,
+        unit: l.unit || "หลา", planned: n(l.yard_per_pc), linked: !!l.fabric_id,
         received: flow?.received ?? 0, used: flow?.used ?? 0,
       };
     }),
@@ -465,7 +465,7 @@ export default function CostingEditor() {
       const flow = e.accessory_id ? flows.acc.get(e.accessory_id) : undefined;
       return {
         name: e.label.trim() || "อุปกรณ์",
-        unit: e.unit || "ชิ้น", planned: n(e.qty_per_pc) * orderQty, linked: !!e.accessory_id,
+        unit: e.unit || "ชิ้น", planned: n(e.qty_per_pc), linked: !!e.accessory_id,
         received: flow?.received ?? 0, used: flow?.used ?? 0,
       };
     }),
@@ -554,7 +554,6 @@ export default function CostingEditor() {
               <button type="button" onClick={saveAsNewProduct} disabled={savingProduct} style={{ whiteSpace: "nowrap" }}>
                 {savingProduct ? "กำลังบันทึก…" : "+ บันทึกเป็นสินค้าใหม่"}
               </button>
-              <Link href="/costing/products" style={{ fontSize: 13, color: "var(--accent)", paddingBottom: 8 }}>จัดการสินค้า →</Link>
             </div>
             <div className="form-grid form-grid-3">
               <Field label="ประเภทสินค้า"><Combo value={form.product_category} onChange={(v) => set("product_category", v)} options={comboOpts.product_category} /></Field>
@@ -660,7 +659,7 @@ export default function CostingEditor() {
 
           <SectionCard title="ผ้า (ต้นทุนต่อตัว)">
             <div style={{ fontSize: 14, color: "var(--text3)", marginBottom: 12, lineHeight: 1.6 }}>
-              เลือกผ้าจากสต็อคเพื่อดึงสเปคและราคาปัจจุบัน (ถัวเฉลี่ยจากล็อต) หรือกรอกเองเป็น placeholder แล้วเชื่อมกับสต็อคภายหลัง · ค่าผ้า/ตัว = Σ(จำนวน/ตัว × ราคา/หน่วย) × (1 + เผื่อตัด {form.cutting_loss_pct || 0}%)
+              เลือกผ้าจากสต็อคเพื่อดึงสเปคและราคาปัจจุบัน (ถัวเฉลี่ยจากล็อต) หรือกรอกเองเป็น placeholder แล้วเชื่อมกับสต็อคภายหลัง · <b style={{ color: "var(--text2)" }}>จำนวนกรอกเป็นยอดรวมทั้งออเดอร์</b> · ค่าผ้า/ตัว = Σ(จำนวนรวม × ราคา/หน่วย) ÷ จำนวนสั่ง × (1 + เผื่อตัด {form.cutting_loss_pct || 0}%)
             </div>
             {form.fabric_lines.map((l, i) => {
               const linked = !!l.fabric_id;
@@ -680,6 +679,18 @@ export default function CostingEditor() {
                         formatRight={(o) => (o.price ? `฿${round2(o.price)}/${o.unit}` : "")}
                       />
                       <input style={{ marginTop: 6 }} value={l.fabric_type} onChange={(e) => updFabricLine(i, { fabric_type: e.target.value })} placeholder="เช่น 60% cotton 40% spandex" />
+                      {linked && (() => {
+                        // Show current on-hand stock for the linked fabric (after selection only — the
+                        // dropdown list stays uncrowded). Falls back silently if the option isn't loaded.
+                        const opt = prices.fabrics.find((o) => o.id === l.fabric_id);
+                        if (!opt) return null;
+                        return (
+                          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
+                            คงเหลือในสต็อค: <b style={{ fontFamily: "var(--mono)", color: opt.stock > 0 ? "var(--text2)" : "var(--red)" }}>
+                              {opt.stock.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b> {opt.unit}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                       <button className="cl-x" title="ลบผ้า" onClick={() => set("fabric_lines", form.fabric_lines.filter((_, j) => j !== i))}>×</button>
@@ -694,7 +705,7 @@ export default function CostingEditor() {
                     <Field label="เลขที่"><input value={l.code} onChange={(e) => updFabricLine(i, { code: e.target.value })} placeholder="เช่น 192" /></Field>
                     <Field label="สี"><input value={l.color} onChange={(e) => updFabricLine(i, { color: e.target.value })} placeholder="เช่น กรม" /></Field>
                     <Field label="หน้าผ้า"><input value={l.width} onChange={(e) => updFabricLine(i, { width: e.target.value })} placeholder={'เช่น 60" / 32T'} /></Field>
-                    <Field label="จำนวน/ตัว">
+                    <Field label="จำนวนรวม (ทั้งออเดอร์)">
                       <div style={{ display: "flex", gap: 6 }}>
                         <input className="num" inputMode="decimal" value={l.yard_per_pc} onChange={(e) => updFabricLine(i, { yard_per_pc: e.target.value })} placeholder="0" style={{ flex: 1, minWidth: 0 }} />
                         <select value={unit} onChange={(e) => updFabricLine(i, { unit: e.target.value })} style={{ width: 78, flexShrink: 0 }}>
@@ -711,10 +722,10 @@ export default function CostingEditor() {
             <button className="small" style={{ padding: "5px 12px", marginTop: 4 }} onClick={addFabricLine}>+ เพิ่มผ้า</button>
           </SectionCard>
 
-          <SectionCard title="ค่าตกแต่ง / พิมพ์ / แพ็ค (ต่อตัว, บาท)">
+          <SectionCard title="ค่าตกแต่ง / พิมพ์ / แพ็ค (รวมทั้งออเดอร์, บาท)">
             <div style={{ fontSize: 14, color: "var(--text3)", marginBottom: 10, lineHeight: 1.65 }}>
               เพิ่ม<b style={{ color: "var(--text2)" }}>อุปกรณ์/ค่าตกแต่ง/พิมพ์/แพ็ค</b>ของออเดอร์ที่นี่ — กดปุ่ม preset ด้านล่าง หรือ “+ เพิ่มอุปกรณ์” เพื่อเพิ่มรายการ<br />
-              ช่อง <b style={{ color: "var(--text2)" }}>“ดึงจากอุปกรณ์”</b> อ่านรายการจาก<b style={{ color: "var(--text2)" }}>สต็อคอุปกรณ์</b> (หน้า อุปกรณ์) และเติม<b style={{ color: "var(--text2)" }}>ราคาปัจจุบัน</b>ให้อัตโนมัติ (ถัวเฉลี่ยจากล็อตที่เหลือ) · ไม่เลือก = placeholder ไว้เชื่อมภายหลัง · แต่ละรายการคิดแบบเหมา (บาท/ตัว) หรือ จำนวน/ตัว × ราคา/หน่วย ก็ได้
+              ช่อง <b style={{ color: "var(--text2)" }}>“ดึงจากอุปกรณ์”</b> อ่านรายการจาก<b style={{ color: "var(--text2)" }}>สต็อคอุปกรณ์</b> (หน้า อุปกรณ์) และเติม<b style={{ color: "var(--text2)" }}>ราคาปัจจุบัน</b>ให้อัตโนมัติ (ถัวเฉลี่ยจากล็อตที่เหลือ) · ไม่เลือก = placeholder ไว้เชื่อมภายหลัง · <b style={{ color: "var(--text2)" }}>กรอกเป็นยอดรวมทั้งออเดอร์</b> แบบเหมา (บาทรวม) หรือ จำนวนรวม × ราคา/หน่วย ก็ได้ (หารด้วยจำนวนสั่งเป็นต้นทุน/ตัว)
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
               {EXTRA_PRESETS.map((label) => (
@@ -738,6 +749,17 @@ export default function CostingEditor() {
                         formatRight={(o) => (o.price ? `฿${round2(o.price)}/${o.unit}` : "")}
                       />
                       <input style={{ marginTop: 6 }} value={e.label} title={e.label} onChange={(ev) => updExtra(i, { label: ev.target.value })} placeholder="ชื่อรายการ เช่น ซิป, พิมพ์" />
+                      {linked && (() => {
+                        // On-hand stock for the linked accessory, shown only after selection.
+                        const opt = prices.accessories.find((o) => o.id === e.accessory_id);
+                        if (!opt) return null;
+                        return (
+                          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
+                            คงเหลือในสต็อค: <b style={{ fontFamily: "var(--mono)", color: opt.stock > 0 ? "var(--text2)" : "var(--red)" }}>
+                              {opt.stock.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b> {opt.unit}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                       <button className="cl-x" title="ลบ" onClick={() => set("extras", form.extras.filter((_, j) => j !== i))}>×</button>
@@ -751,17 +773,17 @@ export default function CostingEditor() {
                   <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 10 }}>
                     <Field label="รูปแบบ">
                       <select value={e.mode} onChange={(ev) => updExtra(i, { mode: ev.target.value === "qty" ? "qty" : "flat" })}>
-                        <option value="flat">เหมา (บาท/ตัว)</option>
+                        <option value="flat">เหมา (บาทรวม)</option>
                         <option value="qty">จำนวน × ราคา</option>
                       </select>
                     </Field>
                     {e.mode === "flat" ? (
-                      <Field label="บาท/ตัว">
+                      <Field label="บาท (รวมทั้งออเดอร์)">
                         <input className="num" inputMode="decimal" value={e.amount} onChange={(ev) => updExtra(i, { amount: ev.target.value })} placeholder="0" />
                       </Field>
                     ) : (
                       <>
-                        <Field label="จำนวน/ตัว">
+                        <Field label="จำนวนรวม (ทั้งออเดอร์)">
                           <input className="num" inputMode="decimal" value={e.qty_per_pc} onChange={(ev) => updExtra(i, { qty_per_pc: ev.target.value })} placeholder="0" />
                         </Field>
                         <Field label="หน่วย">
@@ -780,7 +802,7 @@ export default function CostingEditor() {
                   </div>
                   {e.mode === "qty" && n(e.qty_per_pc) > 0 && n(e.unit_price) > 0 && (
                     <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, textAlign: "right" }}>
-                      = ฿{fmt(n(e.qty_per_pc) * n(e.unit_price))}/ตัว
+                      = ฿{fmt(n(e.qty_per_pc) * n(e.unit_price))} รวม{orderQty > 0 ? ` · ฿${fmt((n(e.qty_per_pc) * n(e.unit_price)) / orderQty)}/ตัว` : ""}
                     </div>
                   )}
                 </div>
@@ -816,7 +838,7 @@ export default function CostingEditor() {
           {!isNew && (
             <SectionCard title="การติดตามวัสดุ (ตามออเดอร์)">
               <div style={{ fontSize: 14, color: "var(--text3)", marginBottom: 12, lineHeight: 1.6 }}>
-                แผน = จำนวน/ตัว × จำนวนสั่ง · รับเข้า/เบิกใช้ มาจากรายการเคลื่อนไหวสต็อคที่ผูกกับออเดอร์นี้ (หน้า บันทึกรายการ) · คงเหลือ = รับเข้า − เบิกใช้
+                แผน = จำนวนรวมที่กรอก (ทั้งออเดอร์) · รับเข้า/เบิกใช้ มาจากรายการเคลื่อนไหวสต็อคที่ผูกกับออเดอร์นี้ (หน้า บันทึกรายการ) · คงเหลือ = รับเข้า − เบิกใช้
               </div>
               {materialRows.length === 0 ? (
                 <div style={{ fontSize: 13, color: "var(--text3)" }}>ยังไม่มีวัสดุที่ติดตามได้ — เพิ่มผ้า หรืออุปกรณ์แบบ “จำนวน × ราคา”</div>
@@ -839,7 +861,7 @@ export default function CostingEditor() {
                         return (
                           <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
                             <td style={{ padding: "8px" }}>{r.name} <span style={{ color: "var(--text3)", fontSize: 12 }}>({r.unit})</span></td>
-                            <td className="num" style={{ padding: "8px", textAlign: "right" }}>{orderQty > 0 ? r.planned.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
+                            <td className="num" style={{ padding: "8px", textAlign: "right" }}>{r.planned > 0 ? r.planned.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
                             <td className="num" style={{ padding: "8px", textAlign: "right" }}>{r.linked ? r.received.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
                             <td className="num" style={{ padding: "8px", textAlign: "right" }}>{r.linked ? r.used.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
                             <td className="num" style={{ padding: "8px", textAlign: "right", fontWeight: 500,
