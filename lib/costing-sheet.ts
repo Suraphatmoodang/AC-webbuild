@@ -211,6 +211,7 @@ export function sheetRowToCostingInput(r: CostingSheetRow, created_by: string): 
     overhead_pc: 0,
     profit_pct: 10,
     cutting_loss_pct: 5,
+    offer_price: 0,
     actual_entries: [],
     note: "",
     created_by,

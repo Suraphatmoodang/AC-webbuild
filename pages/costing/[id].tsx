@@ -72,6 +72,7 @@ type FormState = {
   cut_labor: string; sew_labor: string; qc_labor: string; pack_labor: string;
   output_day: string;      // LEGACY, hidden — carried through so old rows keep the value
   waste_pct: string; overhead_baht: string; overhead_pc: string; profit_pct: string; cutting_loss_pct: string;
+  offer_price: string;   // offered/budget price for the whole order (stored; not in the math)
   actual_entries: ActualEntryF[];
   note: string;
 };
@@ -91,6 +92,7 @@ const emptyForm = (): FormState => ({
   extras: [],
   cut_labor: "", sew_labor: "", qc_labor: "", pack_labor: "", output_day: "",
   waste_pct: "3", overhead_baht: "8000", overhead_pc: "", profit_pct: "10", cutting_loss_pct: "5",
+  offer_price: "",
   actual_entries: [],
   note: "",
 });
@@ -138,7 +140,7 @@ function fromCosting(c: any): FormState {
     })),
     cut_labor: s(c.cut_labor), sew_labor: s(c.sew_labor), qc_labor: s(c.qc_labor), pack_labor: s(c.pack_labor), output_day: s(c.output_day),
     waste_pct: s(c.waste_pct), overhead_baht: s(c.overhead_baht), overhead_pc: legacyOverheadPc(c), profit_pct: s(c.profit_pct),
-    cutting_loss_pct: s(c.cutting_loss_pct),
+    cutting_loss_pct: s(c.cutting_loss_pct), offer_price: s(c.offer_price),
     actual_entries: (c.actual_entries ?? []).map((e: any) => ({
       date: e.date ?? "", category: e.category ?? "other", label: e.label ?? "", amount: s(e.amount), note: e.note ?? "",
     })),
@@ -175,7 +177,7 @@ function toInput(f: FormState, role: Role | null): CostingInput {
     })),
     cut_labor: n(f.cut_labor), sew_labor: n(f.sew_labor), qc_labor: n(f.qc_labor), pack_labor: n(f.pack_labor), output_day: n(f.output_day),
     waste_pct: n(f.waste_pct), overhead_baht: n(f.overhead_baht), overhead_pc: n(f.overhead_pc), profit_pct: n(f.profit_pct),
-    cutting_loss_pct: n(f.cutting_loss_pct),
+    cutting_loss_pct: n(f.cutting_loss_pct), offer_price: n(f.offer_price),
     actual_entries: f.actual_entries.map((e) => ({
       date: e.date || "",
       category: (["material", "labor", "overhead", "other"].includes(e.category) ? e.category : "other") as any,
@@ -365,13 +367,15 @@ export default function CostingEditor() {
   // Pick a stock fabric → link it and pull spec + price. Clearing the dropdown (— กรอกเอง —)
   // just drops the link, leaving whatever was typed → the line becomes a placeholder. The
   // garment-part label (หน้าที่ใช้) is never overwritten; it describes the role, not the fabric.
+  // Price is deliberately NOT pulled from stock — the order keeps its own price (the live stock
+  // price stays visible as a reference below the picker). unit follows the linked fabric.
   const pickFabric = (i: number, fid: string) => {
     const opt = prices.fabrics.find((o) => o.id === fid);
     if (!opt) { updFabricLine(i, { fabric_id: null }); return; }
     updFabricLine(i, {
       fabric_id: opt.id,
       code: opt.code ?? "", fabric_type: opt.fabric_type ?? "", color: opt.color ?? "", width: opt.width ?? "",
-      unit: opt.unit || "หลา", price_per_yard: String(round2(opt.price)),
+      unit: opt.unit || "หลา",
     });
   };
 
@@ -379,15 +383,15 @@ export default function CostingEditor() {
   const addExtra = (p: Partial<ExtraLineF> = {}) => set("extras", [...form.extras, emptyExtra(p)]);
   const updExtra = (i: number, patch: Partial<ExtraLineF>) =>
     set("extras", form.extras.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  // Pick a stock อุปกรณ์ → link it and pull its unit price into qty-mode (price is per-unit,
-  // so จำนวน/ตัว × ราคา/หน่วย is the correct shape). Clearing → placeholder, values kept.
+  // Pick a stock อุปกรณ์ → link it and switch to qty-mode with the stock unit. Price is NOT
+  // pulled from stock — the order keeps its own price (the live stock price shows as a reference
+  // below the picker). Description is also left blank for the user to fill in.
   const pickExtraAcc = (i: number, aid: string) => {
     const opt = prices.accessories.find((o) => o.id === aid);
     if (!opt) { updExtra(i, { accessory_id: null }); return; }
     updExtra(i, {
       accessory_id: opt.id, label: form.extras[i].label || opt.label,
-      // Description is left blank on link — the user fills it in themselves for reference.
-      mode: "qty", unit: opt.unit || "ชิ้น", unit_price: String(round2(opt.price)),
+      mode: "qty", unit: opt.unit || "ชิ้น",
     });
   };
 
@@ -837,7 +841,12 @@ export default function CostingEditor() {
             <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>
               กำไรคิดจากราคาขาย: ราคาขาย = ต้นทุน ÷ (1 − กำไร%) — เท่ากับสูตรในสเปรดชีตเดิม
             </div>
-            <div style={{ marginTop: 12 }}>
+            {/* Order-level offered/budget price — a single figure for the whole order, kept to
+                compare against the computed cost/selling price. Not part of the cost math. */}
+            <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 12 }}>
+              <Field label="ราคาเสนอ/งบ (ทั้งออเดอร์)" hint="ราคาที่เสนอ/งบทั้งออเดอร์ — เก็บไว้เทียบกับต้นทุน/ราคาขายจริง">
+                <input inputMode="decimal" value={form.offer_price} onChange={(e) => set("offer_price", e.target.value)} placeholder="0" />
+              </Field>
               <Field label="หมายเหตุ"><input value={form.note} onChange={(e) => set("note", e.target.value)} /></Field>
             </div>
           </SectionCard>
@@ -1012,23 +1021,51 @@ export default function CostingEditor() {
               </table>
             </div>
 
-            {/* Whole-order totals */}
-            {orderQty > 0 && (
-              <div style={{ flex: "1 1 240px", maxWidth: 340, background: "var(--bg3)", borderRadius: "var(--r)", padding: "16px 18px", fontSize: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ color: "var(--text3)" }}>จำนวนสั่ง</span>
-                  <span style={{ fontFamily: "var(--mono)" }}>{orderQty.toLocaleString()} ตัว</span>
+            {/* Whole-order totals. Shows when there's an order qty OR an offered price entered.
+                The offered price is DISPLAY-ONLY — it never feeds computeCosting or any total above. */}
+            {(orderQty > 0 || n(form.offer_price) > 0) && (() => {
+              const offer = n(form.offer_price);
+              return (
+                <div style={{ flex: "1 1 240px", maxWidth: 340, background: "var(--bg3)", borderRadius: "var(--r)", padding: "16px 18px", fontSize: 14 }}>
+                  {orderQty > 0 && (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                        <span style={{ color: "var(--text3)" }}>จำนวนสั่ง</span>
+                        <span style={{ fontFamily: "var(--mono)" }}>{orderQty.toLocaleString()} ตัว</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                        <span style={{ color: "var(--text3)" }}>ต้นทุนทั้งออเดอร์</span>
+                        <span style={{ fontFamily: "var(--mono)" }}>฿{fmt(bd.totalCost * orderQty)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                        <span style={{ color: "var(--text3)" }}>มูลค่าขายทั้งออเดอร์</span>
+                        <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 600 }}>฿{fmt(bd.sellingPrice * orderQty)}</span>
+                      </div>
+                    </>
+                  )}
+                  {offer > 0 && (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", paddingTop: orderQty > 0 ? 10 : 0, marginTop: orderQty > 0 ? 10 : 0, borderTop: orderQty > 0 ? "1px solid var(--border)" : "none" }}>
+                        <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ทั้งออเดอร์)</span>
+                        <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offer)}</span>
+                      </div>
+                      {orderQty > 0 && (() => {
+                        // Read-only: margin if this offer is accepted = offer − computed order cost.
+                        const margin = offer - bd.totalCost * orderQty;
+                        return (
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
+                            <span style={{ color: "var(--text3)" }}>กำไรถ้ารับราคานี้</span>
+                            <span style={{ fontFamily: "var(--mono)", color: margin >= 0 ? "var(--green)" : "var(--red)" }}>
+                              {margin >= 0 ? "+" : ""}฿{fmt(margin)}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ color: "var(--text3)" }}>ต้นทุนทั้งออเดอร์</span>
-                  <span style={{ fontFamily: "var(--mono)" }}>฿{fmt(bd.totalCost * orderQty)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-                  <span style={{ color: "var(--text3)" }}>มูลค่าขายทั้งออเดอร์</span>
-                  <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 600 }}>฿{fmt(bd.sellingPrice * orderQty)}</span>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       </div>

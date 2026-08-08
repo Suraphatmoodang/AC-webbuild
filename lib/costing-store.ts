@@ -73,6 +73,7 @@ import { getFabrics, getFabricLotMap } from "./fabric-store";
 //     overhead_pc numeric not null default 0,   -- โสหุ้ย/ตัว (baht per piece, typed directly)
 //     profit_pct numeric not null default 10,
 //     cutting_loss_pct numeric not null default 5,
+//     offer_price numeric not null default 0,   -- offered/budget price for the WHOLE order (kept for budget-vs-actual; not in the cost math). Add via: alter table product_costings add column offer_price numeric not null default 0
 //     actual_entries jsonb not null default '[]',   -- Phase D: hand-logged actual costs
 //     note text not null default '',
 //     created_by text not null default '',
@@ -113,6 +114,9 @@ export type SizeRow = { color: string; qty: Record<string, number> };
 //   · unit        = หน่วย ("หลา" | "กิโล"); yard_per_pc & price_per_yard are IN that unit
 // Note: the JSONB keys yard_per_pc / price_per_yard are kept (generic "qty per pc" / "price
 // per unit") so existing saved lines don't need a backfill; the UI labels them จำนวน/ตัว & ราคา/หน่วย.
+// `price_per_yard` is the ORDER'S own price used in the costing math — it's typed by hand and
+// is NOT auto-filled from stock on link (the order keeps its own price; actual cost is
+// reconciled later from tagged transactions).
 export type FabricLine = {
   label: string; fabric_id: string | null;
   code: string; fabric_type: string; color: string; width: string;
@@ -128,6 +132,7 @@ export type FabricLine = {
 //   · desc  = a fuller free-text description for later reference (composition, spec, stock name);
 //             auto-filled from the picked อุปกรณ์ but editable. Purely descriptive — the hard link
 //             to stock is `accessory_id`, so a long desc never affects matching. (JSONB, no migration.)
+//   · unit_price / amount = the order's own price used in the math (NOT auto-filled from stock on link)
 export type ExtraLine = {
   label: string; desc: string; accessory_id: string | null;
   mode: "flat" | "qty"; amount: number; qty_per_pc: number; unit: string; unit_price: number;
@@ -205,6 +210,7 @@ export type ProductCosting = {
   overhead_pc: number;   // โสหุ้ย/ตัว (baht per piece)
   profit_pct: number;
   cutting_loss_pct: number;
+  offer_price: number;   // offered/budget price for the WHOLE order — stored for budget-vs-actual; NOT in the cost math
   actual_entries: ActualEntry[];   // Phase D: hand-logged actual costs (JSONB)
   note: string;
   created_by: string;
