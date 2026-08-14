@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getAccessoryValueRows, getLotValueMap, valueFromLots as accValue } from "@/lib/store";
 import { getFabricValueRows, getFabricLotValueMap, valueFromLots as fabValue, SELF_OWNER } from "@/lib/fabric-store";
 import { useSession, endSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
+import { getLeads, isDue } from "@/lib/lead-store";
 
 // Section picker. The two stock systems (อุปกรณ์ / ผ้า) are fully independent —
 // separate tables, separate pages, separate logs — and share only Suppliers.
@@ -40,6 +41,8 @@ export default function HomePage() {
   const { role } = useSession();
   const [acc, setAcc] = useState<Stat>(null);
   const [fab, setFab] = useState<Stat>(null);
+  // Lead counts for the super-only card (total + how many need chasing today).
+  const [leads, setLeads] = useState<{ all: number; due: number } | null>(null);
   // Per-card "show all" toggle, keyed by section href (both cards now have a breakdown list).
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -94,6 +97,15 @@ export default function HomePage() {
       })
       .catch(() => setFab({ items: 0, value: 0 }));
   }, []);
+
+  // Leads are super-only, and `role` resolves after the first render, so this loads on its own.
+  // A failure (e.g. the table not created yet) just leaves the counts off the card.
+  useEffect(() => {
+    if (role !== "super") { setLeads(null); return; }
+    getLeads()
+      .then((ls) => setLeads({ all: ls.length, due: ls.filter(isDue).length }))
+      .catch(() => setLeads(null));
+  }, [role]);
 
   const stats: Record<string, Stat> = { "/stock": acc, "/fabrics": fab };
 
@@ -216,6 +228,35 @@ export default function HomePage() {
           <div style={{ fontSize: 14, color: "var(--text2)", marginTop: 8 }}>
             บันทึกออเดอร์และติดตามสถานะ (เสนอราคา → ผลิต → จัดส่ง) จัดการสินค้า และคิดต้นทุน/ราคาขายจากสต็อคจริง
           </div>
+        </Link>
+      )}
+
+      {/* Leads (ลูกค้าทัก) — the sales pipeline, super-admin only like costing. */}
+      {role === "super" && (
+        <Link href="/leads" className="card home-card"
+          style={{ display: "block", padding: 20, marginTop: 16, transition: "border-color 0.15s, transform 0.15s" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 21, fontWeight: 500 }}>ลูกค้าทัก</div>
+              <div style={{ fontSize: 15, color: "var(--text3)", letterSpacing: "0.04em" }}>Leads · follow-up · pipeline</div>
+            </div>
+            <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap" }}>แอดมินสูงสุด</span>
+          </div>
+          <div style={{ fontSize: 14, color: "var(--text2)", marginTop: 8 }}>
+            ติดตามลูกค้าที่ทักเข้ามาจาก Facebook / LINE / TikTok ตั้งแต่รับเรื่องจนปิดการขาย
+          </div>
+          {leads && (
+            <div style={{ display: "flex", gap: 18, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: 14 }}>
+              <span style={{ color: "var(--text3)" }}>
+                ทั้งหมด <b style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>{leads.all.toLocaleString()}</b> ราย
+              </span>
+              {leads.due > 0 && (
+                <span style={{ color: "var(--red)" }}>
+                  ต้องติดตาม <b style={{ fontFamily: "var(--mono)" }}>{leads.due.toLocaleString()}</b> ราย
+                </span>
+              )}
+            </div>
+          )}
         </Link>
       )}
 

@@ -58,11 +58,20 @@ const NAV_COSTING: NavItem[] = [
   // { href: "/costing/trends", label: "แนวโน้ม", en: "Trends" },
 ];
 
+// Leads (ลูกค้าทัก) is a fourth standalone section — a sales pipeline, not inventory.
+// Like costing it has no ops/admin split: the pages gate themselves (super-only), so
+// these items carry no `area`.
+const NAV_LEADS: NavItem[] = [
+  { href: "/leads", label: "กระดาน", en: "Board" },
+  { href: "/leads/import", label: "นำเข้า", en: "Import" },
+];
+
 // "/" is the section picker and "/login" belongs to neither — both render bare
 // (logo only, no nav). Everything under /fabrics is the fabric section.
-function sectionFor(pathname: string): "acc" | "fabric" | "costing" | "none" {
+function sectionFor(pathname: string): "acc" | "fabric" | "costing" | "leads" | "none" {
   if (pathname === "/" || pathname === "/login") return "none";
   if (pathname.startsWith("/costing")) return "costing";
+  if (pathname.startsWith("/leads")) return "leads";
   return pathname.startsWith("/fabrics") ? "fabric" : "acc";
 }
 
@@ -70,6 +79,7 @@ const TITLES = {
   acc:     { code: "ACC",     word: "STOCK",     href: "/stock" },
   fabric:  { code: "ผ้า",     word: "FABRIC",    href: "/fabrics" },
   costing: { code: "ต้นทุน",  word: "COSTING",   href: "/costing" },
+  leads:   { code: "ลูกค้า",  word: "LEADS",     href: "/leads" },
   none:    { code: "Apparel", word: "Creations", href: "/" },
 } as const;
 
@@ -87,7 +97,8 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const authed = role !== null;
   const section = sectionFor(router.pathname);
-  const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC : section === "costing" ? NAV_COSTING : [];
+  const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC
+    : section === "costing" ? NAV_COSTING : section === "leads" ? NAV_LEADS : [];
   // Nav visibility:
   //  · public items (no `area`) always show — viewing stock never needs a login.
   //  · LOGGED OUT: gated items still show, so clicking one is what triggers the

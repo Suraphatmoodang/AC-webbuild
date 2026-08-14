@@ -264,3 +264,70 @@ tr:hover td { background: var(--bg3); }
   td { font-size: 13px; }
   .tag { font-size: 13px; }
 }
+
+/* ── Lead board (/leads) ───────────────────────────────────────────────
+   The only kanban in the app, so these classes are scoped to it. The board
+   scrolls HORIZONTALLY inside the page (never widening the body), the same
+   rule the stock tables follow. */
+
+/* Pipeline bar: one segment per stage, width ∝ how many leads sit there. */
+.lead-seam { display: flex; height: 34px; gap: 3px; }
+.lead-seg {
+  border: none; border-radius: 5px; min-width: 34px; color: #fff; padding: 0;
+  font-family: var(--mono); font-size: 12px; cursor: pointer; transition: filter 0.15s;
+}
+.lead-seg:hover { filter: brightness(1.12); }
+.lead-seam-lab { display: flex; gap: 3px; margin-top: 5px; }
+.lead-seam-lab span {
+  flex: 1; min-width: 34px; font-size: 11px; color: var(--text3);
+  text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.lead-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; align-items: flex-start; }
+.lead-col {
+  flex: 0 0 272px; background: var(--bg3); border-radius: var(--r); padding: 8px; min-height: 90px;
+}
+.lead-col.over { background: var(--bg4); outline: 2px dashed var(--border2); }
+
+.lead-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 10px 11px; margin-bottom: 8px; cursor: pointer;
+  transition: box-shadow 0.12s, transform 0.12s;
+}
+.lead-card:hover { box-shadow: 0 3px 10px rgba(15, 23, 42, 0.13); transform: translateY(-1px); }
+.lead-card.dragging { opacity: 0.4; }
+
+/* Card chips. Base is the neutral grey; the modifiers colour-code owner/urgency. */
+.lead-tag {
+  font-size: 11px; padding: 2px 7px; border-radius: 5px;
+  background: var(--bg3); color: var(--text2); border: 1px solid var(--border); white-space: nowrap;
+}
+.lead-tag.mono { font-family: var(--mono); }
+.lead-tag.own  { background: #e7eef7; border-color: #c6d6e9; color: var(--accent); }
+.lead-tag.due  { background: var(--red2); border-color: #edbdb6; color: var(--red); font-weight: 600; }
+.lead-tag.hi   { background: #fef3c7; border-color: #fcd34d; color: #b45309; font-weight: 600; }
+
+/* Detail drawer — slides in from the right so the board stays visible behind it. */
+.lead-scrim { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.42); z-index: 40; }
+.lead-drawer {
+  position: fixed; top: 0; right: 0; height: 100%; width: min(480px, 100%);
+  background: var(--bg); z-index: 50; display: flex; flex-direction: column;
+  box-shadow: -4px 0 24px rgba(15, 23, 42, 0.2);
+}
+.lead-drawer-h {
+  background: var(--text); color: #fff; padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.lead-drawer-b { flex: 1; overflow-y: auto; padding: 16px; }
+.lead-drawer-f {
+  border-top: 1px solid var(--border); background: var(--bg2);
+  padding: 10px 16px; display: flex; gap: 8px; flex-shrink: 0;
+}
+
+/* Phones: columns nearly full-width so one is readable at a time; drawer takes the screen. */
+@media (max-width: 640px) {
+  .lead-col { flex: 0 0 82vw; }
+  .lead-drawer { width: 100%; }
+  .lead-drawer-b .form-grid-2 { grid-template-columns: 1fr; }
+  .lead-seam-lab { display: none; }
+}
