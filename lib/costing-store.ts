@@ -133,14 +133,61 @@ export type FabricLine = {
 //             auto-filled from the picked อุปกรณ์ but editable. Purely descriptive — the hard link
 //             to stock is `accessory_id`, so a long desc never affects matching. (JSONB, no migration.)
 //   · unit_price / amount = the order's own price used in the math (NOT auto-filled from stock on link)
+// Two KINDS of extra line, because they divide differently:
+//   · "acc"     อุปกรณ์ — a physical counted item (ซิป, กระดุม, ตะขอ). Pooled with the other
+//                accessories and divided by their OWN total quantity (e ÷ d).
+//   · "service" ค่าตกแต่ง/พิมพ์/แพ็ค — a process/charge (พิมพ์, ปัก, ย้อม, ซัก, ค่ากล่อง). It has no
+//                comparable unit count, so it is per GARMENT: ยอดรวม ÷ จำนวนสั่ง.
+// Optional on the type + inferred for old rows (see extraKind) → no migration, JSONB as before.
+export type ExtraKind = "acc" | "service";
+export const EXTRA_KINDS: { key: ExtraKind; th: string; hint: string }[] = [
+  { key: "acc",     th: "อุปกรณ์ (นับจำนวน)",     hint: "รวมกับอุปกรณ์อื่น แล้วหารด้วยจำนวนอุปกรณ์รวม" },
+  { key: "service", th: "ค่าตกแต่ง/พิมพ์/แพ็ค", hint: "หารด้วยจำนวนสั่ง (ต่อตัว)" },
+];
 export type ExtraLine = {
   label: string; desc: string; accessory_id: string | null;
   mode: "flat" | "qty"; amount: number; qty_per_pc: number; unit: string; unit_price: number;
+  kind?: ExtraKind;
 };
+// Service-type presets/keywords — used to classify OLD rows that predate `kind`.
+export const SERVICE_PRESETS = ["ค่าพิมพ์", "ค่าปัก", "ค่าอาร์ม", "พิมพ์คอหลัง", "ค่าย้อม", "ค่าซัก", "ค่ากล่อง/ค่ารถ"];
+const SERVICE_WORDS = ["พิมพ์", "ปัก", "อาร์ม", "ย้อม", "ซัก", "รีด", "ค่ารถ", "กล่อง", "sublim"];
+// A line's kind: explicit when set, otherwise inferred — by label keyword first (ค่าพิมพ์ keyed as
+// จำนวน×ราคา is still a service), then by mode (a lump-sum เหมา line is a service, counted = อุปกรณ์).
+export function extraKind(e: { kind?: string; label?: string; mode?: string }): ExtraKind {
+  if (e.kind === "acc" || e.kind === "service") return e.kind;
+  const label = String(e.label ?? "").toLowerCase();
+  if (SERVICE_WORDS.some((w) => label.includes(w.toLowerCase()))) return "service";
+  return e.mode === "qty" ? "acc" : "service";
+}
 // Per-line cost, honoring the mode (old rows with no mode fall back to the flat amount).
 export function extraLineCost(e: { mode?: string; amount: number; qty_per_pc?: number; unit_price?: number }): number {
   const num = (v: any) => (isFinite(Number(v)) ? Number(v) : 0);
   return e.mode === "qty" ? num(e.qty_per_pc) * num(e.unit_price) : num(e.amount);
+}
+
+// ── Per-line "own cost" (DISPLAY ONLY — never feeds computeCosting) ──────────
+// The ต้นทุนต่อหน่วย column of the shop's costing sheet: what ONE accessory costs per garment,
+// on its own. How to read the line's total depends on its หน่วย:
+//   · PIECE units (ชิ้น/ใบ/เล่ม/เส้น) — one goes on one garment, so the line's own cost per
+//     garment IS its unit price (ยอดรวม ÷ จำนวน = ราคาต่อหน่วย; e.g. ซิป 4295.70 ÷ 1290 = 3.33).
+//   · BULK units (กุรุส/กิโล/ม้วน/…) — a purchase covering the whole run, so it spreads:
+//     ยอดรวม ÷ จำนวนสั่ง (e.g. ตะขอ 13 × 210 = 2730 ÷ 1820 = 1.50).
+// A garment's true accessory cost is then the sum of the lines that actually apply to it
+// (ซิป สีดำ 3.33 + ตะขอ 1.50 = 4.83) — which differs per colour, unlike the order-wide average.
+// The ORDER total is unchanged and stays Σ(ยอดรวมทุกชิ้น) ÷ จำนวนสั่ง (= 4.78 here).
+export const PIECE_UNITS = ["ชิ้น", "ใบ", "เล่ม", "เส้น"] as const;
+export function isPieceUnit(unit: string): boolean {
+  return (PIECE_UNITS as readonly string[]).includes((unit || "").trim());
+}
+export function extraLineUnitCost(
+  e: { mode?: string; amount: number; qty_per_pc?: number; unit?: string; unit_price?: number },
+  orderQty: number,
+): number {
+  const num = (v: any) => (isFinite(Number(v)) ? Number(v) : 0);
+  if (e.mode === "qty" && isPieceUnit(e.unit || "")) return num(e.unit_price);
+  const qty = num(orderQty);
+  return qty > 0 ? extraLineCost(e) / qty : 0;
 }
 
 // Phase D — a hand-logged ACTUAL cost incurred on the order (labor paid, dye bill, transport,
@@ -236,7 +283,9 @@ export type CostingInput = Omit<ProductCosting, "id" | "created_at" | "updated_a
 //   · price    = total + profit
 export type CostBreakdown = {
   fabricPerPc: number;
-  extrasSum: number;
+  extrasSum: number;     // accSum + serviceSum (kept for existing call sites)
+  accSum: number;        // อุปกรณ์ — pooled ÷ their own total quantity
+  serviceSum: number;    // ค่าตกแต่ง/พิมพ์/แพ็ค — ÷ จำนวนสั่ง
   materialSubtotal: number;
   wasteCost: number;
   laborTotal: number;
@@ -266,7 +315,20 @@ export function computeCosting(c: {
   const perPc = qty > 0 ? 1 / qty : 0;
   const fabricRaw = c.fabric_lines.reduce((s, f) => s + num(f.yard_per_pc) * num(f.price_per_yard), 0) * perPc;
   const fabricPerPc = fabricRaw * (1 + num(c.cutting_loss_pct) / 100);
-  const extrasSum = c.extras.reduce((s, e) => s + extraLineCost(e), 0) * perPc;
+  // อุปกรณ์ (acc): counted lines are pooled and divided by their OWN total quantity (the sheet's
+  // e ÷ d) → the average cost of ONE accessory, e.g. 8695.20 ÷ 1833 = 4.74. An acc line with no
+  // unit count (เหมา) can't join that pool, so it falls back to ÷ จำนวนสั่ง.
+  // ค่าตกแต่ง/พิมพ์/แพ็ค (service): always per garment → ยอดรวม ÷ จำนวนสั่ง.
+  const accLines = c.extras.filter((e) => extraKind(e) === "acc");
+  const accCounted = accLines.filter((e) => e.mode === "qty" && num(e.qty_per_pc) > 0);
+  const accBaht = accCounted.reduce((s, e) => s + extraLineCost(e), 0);
+  const accQty = accCounted.reduce((s, e) => s + num(e.qty_per_pc), 0);
+  const accRest = accLines.filter((e) => !(e.mode === "qty" && num(e.qty_per_pc) > 0))
+    .reduce((s, e) => s + extraLineCost(e), 0);
+  const accSum = (accQty > 0 ? accBaht / accQty : 0) + accRest * perPc;
+  const serviceSum = c.extras.filter((e) => extraKind(e) === "service")
+    .reduce((s, e) => s + extraLineCost(e), 0) * perPc;
+  const extrasSum = accSum + serviceSum;
   const materialSubtotal = fabricPerPc + extrasSum;
   const wasteCost = materialSubtotal * (num(c.waste_pct) / 100);
   const laborTotal = num(c.cut_labor) + num(c.sew_labor) + num(c.qc_labor) + num(c.pack_labor);   // ตัด + เย็บ + QC + แพ็ค
@@ -275,7 +337,7 @@ export function computeCosting(c: {
   const denom = 1 - num(c.profit_pct) / 100;
   const profit = denom > 0 ? totalCost / denom - totalCost : 0;
   const sellingPrice = totalCost + profit;
-  return { fabricPerPc, extrasSum, materialSubtotal, wasteCost, laborTotal, overheadPerPc, totalCost, profit, sellingPrice };
+  return { fabricPerPc, extrasSum, accSum, serviceSum, materialSubtotal, wasteCost, laborTotal, overheadPerPc, totalCost, profit, sellingPrice };
 }
 
 // Whether any cost input has been entered — used to show "—" instead of ฿0.00

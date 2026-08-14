@@ -10,6 +10,11 @@ import {
   getOrderFlows,
   getOrderActualMaterial,
   computeCosting,
+  extraLineCost,
+  extraLineUnitCost,
+  extraKind,
+  isPieceUnit,
+  type ExtraKind,
   ORDER_STATUSES,
   ACTUAL_CATEGORIES,
   DEFAULT_SIZE_LABELS,
@@ -23,11 +28,24 @@ import { PRODUCT_OPT as OPT, buildComboOptions } from "@/lib/product-spec";
 import { Combo } from "@/lib/combo";
 import { StockSelect } from "@/lib/stock-select";
 
-// Preset trim/print/packaging chips (per piece), mirrored from the GKM app.
-const EXTRA_PRESETS = [
-  "ค่าพิมพ์", "ค่าปัก", "ค่าอาร์ม", "ซิป", "ยางยืด", "เชือก", "กระดุม",
-  "พิมพ์คอหลัง", "ตราเมน", "ตราไซส์", "ตราแคร์", "ด้ายเย็บ", "ป้ายแขวน", "ค่าถุง",
-  "ค่าทิชชู่", "ค่ากล่อง/ค่ารถ", "ค่าย้อม", "ค่าซัก",
+// Preset chips, split by kind so picking one already sets the right cost basis:
+//   · อุปกรณ์ (acc)     — counted physical items → pooled ÷ their own total quantity
+//   · ค่าตกแต่ง (service) — processes/charges     → ÷ จำนวนสั่ง
+const ACC_PRESETS = [
+  "ซิป", "กระดุม", "ยางยืด", "เชือก", "ด้ายเย็บ", "ตะขอ",
+  "ตราเมน", "ตราไซส์", "ตราแคร์", "ป้ายแขวน", "ค่าถุง", "ค่าทิชชู่",
+];
+const SERVICE_PRESET_CHIPS = [
+  "ค่าพิมพ์", "ค่าปัก", "ค่าอาร์ม", "พิมพ์คอหลัง", "ค่าย้อม", "ค่าซัก", "ค่ากล่อง/ค่ารถ",
+];
+// Sentinel ids for the two placeholder rows pinned at the top of the อุปกรณ์ picker. Picking one
+// keeps accessory_id null (no stock link) and sets the line's kind, so the cost basis is chosen
+// in the SAME dropdown as the stock item: อุปกรณ์ → pooled ÷ จำนวนอุปกรณ์ · ค่าใช้จ่าย → ÷ จำนวนสั่ง.
+const PH_ACC = "__ph_acc__";
+const PH_SERVICE = "__ph_service__";
+const EXTRA_SPECIALS = [
+  { id: PH_ACC, label: "— อุปกรณ์ ยังไม่มีในสต็อค (Placeholder) —", hint: "หารด้วยจำนวนอุปกรณ์รวม" },
+  { id: PH_SERVICE, label: "— ค่าตกแต่ง/พิมพ์/แพ็ค (ไม่ใช่ของในสต็อค) —", hint: "หารด้วยจำนวนสั่ง" },
 ];
 
 // Ladder used to auto-seed size columns from จำนวนไซส์ (grow-only).
@@ -49,9 +67,10 @@ const emptyActual = (): ActualEntryF => ({ date: new Date().toISOString().split(
 type ExtraLineF = {
   label: string; desc: string; accessory_id: string | null;
   mode: "flat" | "qty"; amount: string; qty_per_pc: string; unit: string; unit_price: string;
+  kind: ExtraKind;
 };
 const emptyExtra = (p: Partial<ExtraLineF> = {}): ExtraLineF => ({
-  label: "", desc: "", accessory_id: null, mode: "flat", amount: "", qty_per_pc: "", unit: "ชิ้น", unit_price: "", ...p,
+  label: "", desc: "", accessory_id: null, mode: "flat", amount: "", qty_per_pc: "", unit: "ชิ้น", unit_price: "", kind: "acc", ...p,
 });
 
 type FormState = {
@@ -133,10 +152,13 @@ function fromCosting(c: any): FormState {
       code: f.code ?? "", fabric_type: f.fabric_type ?? "", color: f.color ?? "", width: f.width ?? "",
       unit: f.unit || "หลา", yard_per_pc: s(f.yard_per_pc), price_per_yard: s(f.price_per_yard),
     })),
+    // `kind` is inferred for rows saved before it existed (extraKind: label keyword, then mode),
+    // so old orders land in the right bucket without a data migration — and stay editable.
     extras: (c.extras ?? []).map((e: any) => ({
       label: e.label ?? "", desc: e.desc ?? "", accessory_id: e.accessory_id ?? null,
       mode: e.mode === "qty" ? "qty" : "flat",
       amount: s(e.amount), qty_per_pc: s(e.qty_per_pc), unit: e.unit || "ชิ้น", unit_price: s(e.unit_price),
+      kind: extraKind(e),
     })),
     cut_labor: s(c.cut_labor), sew_labor: s(c.sew_labor), qc_labor: s(c.qc_labor), pack_labor: s(c.pack_labor), output_day: s(c.output_day),
     waste_pct: s(c.waste_pct), overhead_baht: s(c.overhead_baht), overhead_pc: legacyOverheadPc(c), profit_pct: s(c.profit_pct),
@@ -174,6 +196,7 @@ function toInput(f: FormState, role: Role | null): CostingInput {
       label: e.label.trim(), desc: e.desc.trim(), accessory_id: e.accessory_id,
       mode: e.mode === "qty" ? "qty" as const : "flat" as const,
       amount: n(e.amount), qty_per_pc: n(e.qty_per_pc), unit: e.unit || "ชิ้น", unit_price: n(e.unit_price),
+      kind: e.kind,
     })),
     cut_labor: n(f.cut_labor), sew_labor: n(f.sew_labor), qc_labor: n(f.qc_labor), pack_labor: n(f.pack_labor), output_day: n(f.output_day),
     waste_pct: n(f.waste_pct), overhead_baht: n(f.overhead_baht), overhead_pc: n(f.overhead_pc), profit_pct: n(f.profit_pct),
@@ -387,11 +410,15 @@ export default function CostingEditor() {
   // pulled from stock — the order keeps its own price (the live stock price shows as a reference
   // below the picker). Description is also left blank for the user to fill in.
   const pickExtraAcc = (i: number, aid: string) => {
+    // The two placeholder rows carry no stock link — they just set the line's kind (cost basis).
+    if (aid === PH_SERVICE) { updExtra(i, { accessory_id: null, kind: "service", mode: "flat" }); return; }
+    if (aid === PH_ACC) { updExtra(i, { accessory_id: null, kind: "acc", mode: "qty" }); return; }
     const opt = prices.accessories.find((o) => o.id === aid);
     if (!opt) { updExtra(i, { accessory_id: null }); return; }
+    // A real stock item is always an อุปกรณ์ (counted).
     updExtra(i, {
       accessory_id: opt.id, label: form.extras[i].label || opt.label,
-      mode: "qty", unit: opt.unit || "ชิ้น",
+      kind: "acc", mode: "qty", unit: opt.unit || "ชิ้น",
     });
   };
 
@@ -446,9 +473,12 @@ export default function CostingEditor() {
 
   // Each row carries its per-piece value; the summary table renders both that and the
   // order total (per-piece × จำนวนสั่ง) side by side, so "8790 total ⇄ 4.83/ตัว" is unambiguous.
+  // อุปกรณ์ and ค่าตกแต่ง are listed separately — they use different divisors (จำนวนอุปกรณ์รวม
+  // vs จำนวนสั่ง), so showing one merged figure hid which basis produced it.
   const breakdownRows: [string, number][] = [
     ["ค่าผ้า", bd.fabricPerPc],
-    ["ค่าตกแต่ง/พิมพ์/แพ็ค", bd.extrasSum],
+    ["ค่าอุปกรณ์", bd.accSum],
+    ["ค่าตกแต่ง/พิมพ์/แพ็ค", bd.serviceSum],
     ["รวมวัตถุดิบ", bd.materialSubtotal],
     [`เผื่อเสีย (${form.waste_pct || 0}%)`, bd.wasteCost],
     ["ค่าแรง (ตัด+เย็บ+QC+แพ็ค)", bd.laborTotal],
@@ -730,15 +760,23 @@ export default function CostingEditor() {
             <button className="small" style={{ padding: "5px 12px", marginTop: 4 }} onClick={addFabricLine}>+ เพิ่มผ้า</button>
           </SectionCard>
 
-          <SectionCard title="ค่าตกแต่ง / พิมพ์ / แพ็ค (รวมทั้งออเดอร์, บาท)">
+          <SectionCard title="อุปกรณ์ / ค่าตกแต่ง / พิมพ์ / แพ็ค (รวมทั้งออเดอร์, บาท)">
             <div style={{ fontSize: 14, color: "var(--text3)", marginBottom: 10, lineHeight: 1.65 }}>
-              เพิ่ม<b style={{ color: "var(--text2)" }}>อุปกรณ์/ค่าตกแต่ง/พิมพ์/แพ็ค</b>ของออเดอร์ที่นี่ — กดปุ่ม preset ด้านล่าง หรือ “+ เพิ่มอุปกรณ์” เพื่อเพิ่มรายการ<br />
-              ช่อง <b style={{ color: "var(--text2)" }}>“ดึงจากอุปกรณ์”</b> อ่านรายการจาก<b style={{ color: "var(--text2)" }}>สต็อคอุปกรณ์</b> (หน้า อุปกรณ์) และเติม<b style={{ color: "var(--text2)" }}>ราคาปัจจุบัน</b>ให้อัตโนมัติ (ถัวเฉลี่ยจากล็อตที่เหลือ) · ไม่เลือก = placeholder ไว้เชื่อมภายหลัง · <b style={{ color: "var(--text2)" }}>กรอกเป็นยอดรวมทั้งออเดอร์</b> แบบเหมา (บาทรวม) หรือ จำนวนรวม × ราคา/หน่วย ก็ได้ (หารด้วยจำนวนสั่งเป็นต้นทุน/ตัว)
+              เพิ่ม<b style={{ color: "var(--text2)" }}>อุปกรณ์/ค่าตกแต่ง/พิมพ์/แพ็ค</b>ของออเดอร์ที่นี่ — กดปุ่ม preset ด้านล่าง หรือ “+ เพิ่มรายการ” · <b style={{ color: "var(--text2)" }}>กรอกเป็นยอดรวมทั้งออเดอร์</b><br />
+              แต่ละรายการเลือก<b style={{ color: "var(--text2)" }}>ประเภท</b>ได้ — <b style={{ color: "var(--text2)" }}>อุปกรณ์</b> (ของนับชิ้น เช่น ซิป ตะขอ) รวมกันแล้ว<b style={{ color: "var(--text2)" }}>หารด้วยจำนวนอุปกรณ์รวม</b> · <b style={{ color: "var(--text2)" }}>ค่าตกแต่ง/พิมพ์/แพ็ค</b> (พิมพ์ ปัก ย้อม ซัก) <b style={{ color: "var(--text2)" }}>หารด้วยจำนวนสั่ง</b> — คิดแยกกัน แล้วบวกรวมเป็นต้นทุน/ตัว
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-              {EXTRA_PRESETS.map((label) => (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "var(--text3)", marginRight: 2 }}>อุปกรณ์:</span>
+              {ACC_PRESETS.map((label) => (
                 <button key={label} className="small" style={{ padding: "4px 10px", fontSize: 12 }}
-                  onClick={() => addExtra({ label })}>+ {label}</button>
+                  onClick={() => addExtra({ label, kind: "acc", mode: "qty" })}>+ {label}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "var(--text3)", marginRight: 2 }}>ค่าตกแต่ง:</span>
+              {SERVICE_PRESET_CHIPS.map((label) => (
+                <button key={label} className="small" style={{ padding: "4px 10px", fontSize: 12 }}
+                  onClick={() => addExtra({ label, kind: "service", mode: "flat" })}>+ {label}</button>
               ))}
             </div>
             {form.extras.map((e, i) => {
@@ -748,12 +786,14 @@ export default function CostingEditor() {
                   {/* Top row: stock link + item name, with chip/× at right — mirrors the fabric card. */}
                   <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <label className="form-label" style={{ marginBottom: 4 }}>ดึงจากอุปกรณ์ หรือ กรอกเอง</label>
+                      <label className="form-label" style={{ marginBottom: 4 }}>ดึงจากอุปกรณ์ · หรือเลือกเป็น Placeholder</label>
+                      {/* One picker chooses BOTH the stock link and the cost basis: a real อุปกรณ์,
+                          an อุปกรณ์ not yet in stock, or a cost that will never be stock. */}
                       <StockSelect
-                        value={e.accessory_id}
+                        value={e.accessory_id ?? (e.kind === "service" ? PH_SERVICE : PH_ACC)}
                         onChange={(id) => pickExtraAcc(i, id)}
                         options={prices.accessories}
-                        placeholder="— กรอกเอง (Placeholder) —"
+                        specials={EXTRA_SPECIALS}
                         formatRight={(o) => (o.price ? `฿${round2(o.price)}/${o.unit}` : "")}
                       />
                       <input style={{ marginTop: 6 }} value={e.label} title={e.label} onChange={(ev) => updExtra(i, { label: ev.target.value })} placeholder="ชื่อรายการ เช่น ซิป, พิมพ์" />
@@ -773,13 +813,22 @@ export default function CostingEditor() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                       <button className="cl-x" title="ลบ" onClick={() => set("extras", form.extras.filter((_, j) => j !== i))}>×</button>
-                      <span style={{ fontSize: 11, whiteSpace: "nowrap", padding: "2px 8px", borderRadius: 999,
-                        background: linked ? "#dcfce7" : "#fef3c7", color: linked ? "var(--green)" : "#b45309" }}>
-                        {linked ? "เชื่อมสต็อคแล้ว" : "ยังไม่มีในสต็อค"}
-                      </span>
+                      {/* Three states: linked to stock · อุปกรณ์ placeholder (amber, to link later) ·
+                          a cost line (violet — never a stock item, so it needs no link). */}
+                      {(() => {
+                        const svc = e.kind === "service";
+                        const bg = linked ? "#dcfce7" : svc ? "#ede9fe" : "#fef3c7";
+                        const fg = linked ? "var(--green)" : svc ? "#6d28d9" : "#b45309";
+                        return (
+                          <span style={{ fontSize: 11, whiteSpace: "nowrap", padding: "2px 8px", borderRadius: 999, background: bg, color: fg }}>
+                            {linked ? "เชื่อมสต็อคแล้ว" : svc ? "ค่าใช้จ่าย" : "ยังไม่มีในสต็อค"}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
-                  {/* Second row: cost mode + amounts, in a grid like the fabric card. */}
+                  {/* Second row: cost mode + amounts. The cost BASIS comes from the picker above
+                      (อุปกรณ์ → pooled ÷ จำนวนอุปกรณ์รวม · ค่าใช้จ่าย → ÷ จำนวนสั่ง). */}
                   <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 10 }}>
                     <Field label="รูปแบบ">
                       <select value={e.mode} onChange={(ev) => updExtra(i, { mode: ev.target.value === "qty" ? "qty" : "flat" })}>
@@ -810,15 +859,62 @@ export default function CostingEditor() {
                       </>
                     )}
                   </div>
-                  {e.mode === "qty" && n(e.qty_per_pc) > 0 && n(e.unit_price) > 0 && (
-                    <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, textAlign: "right" }}>
-                      = ฿{fmt(n(e.qty_per_pc) * n(e.unit_price))} รวม{orderQty > 0 ? ` · ฿${fmt((n(e.qty_per_pc) * n(e.unit_price)) / orderQty)}/ตัว` : ""}
-                    </div>
-                  )}
+                  {/* This line's OWN cost (the ต้นทุนต่อหน่วย column of the costing sheet): a piece
+                      unit costs its unit price per garment; a bulk purchase spreads over the order. */}
+                  {(() => {
+                    const line = { mode: e.mode, amount: n(e.amount), qty_per_pc: n(e.qty_per_pc), unit: e.unit, unit_price: n(e.unit_price) };
+                    const total = extraLineCost(line);
+                    if (total <= 0) return null;
+                    // A service always shows ÷ จำนวนสั่ง; an accessory shows its own unit cost.
+                    const service = e.kind === "service";
+                    const own = service ? (orderQty > 0 ? total / orderQty : 0) : extraLineUnitCost(line, orderQty);
+                    const piece = !service && e.mode === "qty" && isPieceUnit(e.unit || "");
+                    if (!piece && orderQty <= 0) return <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, textAlign: "right" }}>ยอดรวม ฿{fmt(total)}</div>;
+                    return (
+                      <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, textAlign: "right" }}>
+                        ยอดรวม ฿{fmt(total)} · ต้นทุนของรายการนี้ <b style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>฿{fmt(own)}</b>/ตัว
+                        <span style={{ opacity: 0.75 }}> ({piece ? "ราคาต่อหน่วย" : `฿${fmt(total)} ÷ ${orderQty.toLocaleString()}`})</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
             <button className="small" style={{ padding: "5px 12px", marginTop: 4 }} onClick={() => addExtra()}>+ เพิ่มอุปกรณ์</button>
+            {/* Section totals — the d / e sums of the costing sheet. Σ จำนวน is a reference count
+                across mixed units (เส้น + กุรุส), NOT a divisor; the per-piece figure divides ยอดรวม
+                by จำนวนสั่ง. Each line's own cost is shown on the line itself. */}
+            {form.extras.length > 0 && (() => {
+              const lines = form.extras.map((e) => ({ kind: e.kind, mode: e.mode, amount: n(e.amount), qty_per_pc: n(e.qty_per_pc), unit: e.unit, unit_price: n(e.unit_price) }));
+              const accCounted = lines.filter((l) => l.kind === "acc" && l.mode === "qty" && l.qty_per_pc > 0);
+              const accQty = accCounted.reduce((s, l) => s + l.qty_per_pc, 0);           // d
+              const accBaht = accCounted.reduce((s, l) => s + extraLineCost(l), 0);      // e
+              const svcBaht = lines.filter((l) => l.kind === "service").reduce((s, l) => s + extraLineCost(l), 0);
+              if (accBaht + svcBaht <= 0) return null;
+              const cell = { color: "var(--text3)" as const };
+              const b = { fontFamily: "var(--mono)", color: "var(--text2)" } as const;
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, fontSize: 13 }}>
+                  {accBaht > 0 && (
+                    <div style={cell}>
+                      อุปกรณ์: ฿<b style={b}>{fmt(accBaht)}</b> ÷ <b style={b}>{accQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b> ชิ้น
+                      {" = "}<b style={{ ...b, color: "var(--text)" }}>฿{fmt(accBaht / accQty)}</b>/ตัว
+                    </div>
+                  )}
+                  {svcBaht > 0 && (
+                    <div style={cell}>
+                      ค่าตกแต่ง/พิมพ์/แพ็ค: ฿<b style={b}>{fmt(svcBaht)}</b>
+                      {orderQty > 0 && <> ÷ <b style={b}>{orderQty.toLocaleString()}</b> ตัว = <b style={{ ...b, color: "var(--text)" }}>฿{fmt(svcBaht / orderQty)}</b>/ตัว</>}
+                    </div>
+                  )}
+                  {accBaht > 0 && svcBaht > 0 && orderQty > 0 && accQty > 0 && (
+                    <div style={{ color: "var(--text2)", fontWeight: 600, paddingTop: 2 }}>
+                      รวม <b style={{ fontFamily: "var(--mono)" }}>฿{fmt(accBaht / accQty + svcBaht / orderQty)}</b>/ตัว
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </SectionCard>
 
           <SectionCard title="ค่าแรง">

@@ -5,6 +5,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 // selects an item by id and returns that id; typing filters the list by label. It is NOT a
 // free-text field — an unmatched query selects nothing. Picking the placeholder row returns "".
 export type StockOption = { id: string; label: string; unit?: string; price?: number };
+// Extra non-stock rows pinned to the TOP of the menu (above the real stock list). They let one
+// picker choose between "a real stock item" and several kinds of placeholder — e.g. an อุปกรณ์
+// that isn't in stock yet vs. a pure cost line (ค่าพิมพ์/ค่าย้อม) that will never be stock.
+// Their ids are sentinels chosen by the caller; `hint` is dim helper text shown beside the label.
+export type StockSpecial = { id: string; label: string; hint?: string };
 
 // Render only this many matches at once — filtering 5000 strings is cheap, but painting
 // 5000 rows is not. A footer tells the user to narrow the search when there are more.
@@ -16,18 +21,22 @@ export function StockSelect({
   options,
   placeholder = "— เลือก —",
   formatRight,
+  specials,
 }: {
   value: string | null;
   onChange: (id: string) => void;       // "" clears back to the placeholder
   options: StockOption[];
   placeholder?: string;
   formatRight?: (o: StockOption) => string;   // e.g. a price/unit suffix
+  specials?: StockSpecial[];            // pinned non-stock rows; replaces the single placeholder row
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const selected = value ? options.find((o) => o.id === value) ?? null : null;
+  // A special id selects like a stock row (so the closed box shows its label), but carries no item.
+  const special = value ? specials?.find((s) => s.id === value) ?? null : null;
+  const selected = value ? options.find((o) => o.id === value) ?? special ?? null : null;
 
   // Close when clicking outside.
   useEffect(() => {
@@ -90,10 +99,22 @@ export function StockSelect({
 
       {open && (
         <div className="combo-menu">
-          <div className={`combo-opt${!value ? " sel" : ""}`}
-            onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
-            {placeholder}
-          </div>
+          {specials && specials.length ? (
+            // Pinned placeholder rows — one per kind of non-stock line.
+            specials.map((s) => (
+              <div key={s.id} className={`combo-opt${s.id === value ? " sel" : ""}`}
+                style={{ whiteSpace: "normal" }}
+                onMouseDown={(e) => { e.preventDefault(); pick(s.id); }}>
+                {s.label}
+                {s.hint ? <span style={{ color: "var(--text3)", marginLeft: 6 }}>{s.hint}</span> : null}
+              </div>
+            ))
+          ) : (
+            <div className={`combo-opt${!value ? " sel" : ""}`}
+              onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
+              {placeholder}
+            </div>
+          )}
           {shown.map((o) => (
             <div key={o.id} className={`combo-opt${o.id === value ? " sel" : ""}`}
               title={o.label}
