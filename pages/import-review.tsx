@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
+import { matchesQuery } from "@/lib/search-match";
 import { getPendingImports, approveImports, rejectImports, getDuplicateMap, getSuppliers, updateImportRow,
   importDupKeyForRow, type ImportRow, type Accessory, type Supplier } from "@/lib/store";
 import { useRequireAccess } from "@/lib/auth";
@@ -60,13 +61,8 @@ export default function ImportReviewPage() {
   const isValid = (r: ImportRow) => r.type.trim() !== "" && r.unit.trim() !== "";
   const supName = (id: string | null) => suppliers.find((s) => s.id === id)?.supplier_name ?? "—";
 
-  const filtered = rows.filter((r) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
-      r.acc_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q) ||
-      r.customer.toLowerCase().includes(q);
-  });
+  const filtered = rows.filter((r) =>
+    matchesQuery(search, r.type, r.description, r.acc_code, r.supplier_name, r.customer));
 
   const pg = usePagination(filtered, `${search}|${pageSize}`, pageSize);
   const pageRows = pg.pageItems;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { matchesTokens, searchTokens } from "./search-match";
 
 // A searchable, id-based picker for large stock lists (อุปกรณ์ / ผ้า can be 5000+ rows —
 // a native <select> is unusable there). Unlike Combo (which is string type-or-pick), this
@@ -48,9 +49,12 @@ export function StockSelect({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
+  // Tokenised match: every word of the query must appear in the label, in any order — so
+  // "ซิป ดำ" finds "ซิป วีนัส · ซิปไนล่อนปิดท้าย #03 · สีดำ", which the old contiguous
+  // includes() could not (the words aren't adjacent in the joined label).
   const { shown, total } = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const all = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+    const tokens = searchTokens(query);
+    const all = tokens.length ? options.filter((o) => matchesTokens(tokens, o.label)) : options;
     return { shown: all.slice(0, CAP), total: all.length };
   }, [query, options]);
 

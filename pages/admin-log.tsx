@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
+import { matchesQuery } from "@/lib/search-match";
 import { getApprovedImports, getTransactions, getAccessories, getSuppliers, getLotMap, valueFromLots,
   type ImportRow, type Transaction, type Accessory, type Supplier, type Lot } from "@/lib/store";
 import { useRequireAccess } from "@/lib/auth";
@@ -72,11 +73,7 @@ export default function AdminLogPage() {
   const filteredEvents = events.filter((e) => {
     if (kindFilter !== "all" && e.kind !== kindFilter) return false;
     if (txFilter !== "all" && (e.kind !== "transaction" || e.txType !== txFilter)) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return e.label.toLowerCase().includes(q) || e.detail.toLowerCase().includes(q);
-    }
-    return true;
+    return matchesQuery(search, e.label, e.detail);
   });
 
   const pg = usePagination(filteredEvents, `${kindFilter}|${txFilter}|${search}`);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
+import { matchesQuery } from "@/lib/search-match";
 import { buildFabricMatchIndex, fabricMatchKeyForRow, applyFabricUpdates, getSuppliers,
   type Fabric, type Supplier, type FabricUpdatableField } from "@/lib/fabric-store";
 import { parseFabricSheet, resolveFabricColumns, type FabricSheetRow } from "@/lib/fabric-sheet";
@@ -186,10 +187,7 @@ export default function FabricStockUpdatePage() {
   // Visible rows (status filter + search)
   const visible = rows.map((r, i) => ({ r, i })).filter(({ r }) => {
     if (matchFilter !== "all" && r._match !== matchFilter) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) || r.owner.toLowerCase().includes(q) ||
-      r.color.toLowerCase().includes(q) || r.fabric_code.toLowerCase().includes(q);
+    return matchesQuery(search, r.fabric_type, r.construction, r.owner, r.color, r.fabric_code);
   });
 
   const pg = usePagination(visible, `${search}|${matchFilter}`, pageSize);

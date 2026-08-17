@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
+import { matchesQuery } from "@/lib/search-match";
 import { getPendingFabricImports, approveFabricImports, rejectFabricImports, getFabricDuplicateMap,
   getSuppliers, updateFabricImportRow, SELF_OWNER, fabricImportDupKeyForRow,
   type FabricImportRow, type Fabric, type Supplier } from "@/lib/fabric-store";
@@ -69,14 +70,8 @@ export default function FabricImportReviewPage() {
     ...rows.map((r) => r.owner),
   ].filter(Boolean))).sort();
 
-  const filtered = rows.filter((r) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return r.fabric_type.toLowerCase().includes(q) || r.construction.toLowerCase().includes(q) ||
-      r.composition.toLowerCase().includes(q) || r.color.toLowerCase().includes(q) ||
-      r.fabric_code.toLowerCase().includes(q) || r.supplier_name.toLowerCase().includes(q) ||
-      r.owner.toLowerCase().includes(q);
-  });
+  const filtered = rows.filter((r) =>
+    matchesQuery(search, r.fabric_type, r.construction, r.composition, r.color, r.fabric_code, r.supplier_name, r.owner));
 
   const pg = usePagination(filtered, `${search}|${pageSize}`, pageSize);
   const pageRows = pg.pageItems;

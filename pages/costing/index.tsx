@@ -5,6 +5,7 @@ import { readRole, type Role } from "@/lib/auth";
 import { getCostings, deleteCosting, computeCosting, hasCosting, statusMeta, ORDER_STATUSES, type ProductCosting } from "@/lib/costing-store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { matchesTokens, searchTokens } from "@/lib/search-match";
 
 function StatusChip({ status }: { status: string }) {
   const m = statusMeta(status);
@@ -64,11 +65,10 @@ export default function CostingList() {
 
   // Count per status (over the search-filtered set, ignoring the status filter itself).
   const searched = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return priced;
+    const tokens = searchTokens(query);
+    if (!tokens.length) return priced;
     return priced.filter(({ c }) =>
-      [c.style_no, c.po_no, c.pn_no, c.customer, c.product_type, c.description, c.brand]
-        .some((v) => String(v ?? "").toLowerCase().includes(q))
+      matchesTokens(tokens, c.style_no, c.po_no, c.pn_no, c.customer, c.product_type, c.description, c.brand, c.code, c.tags)
     );
   }, [priced, query]);
 
@@ -83,18 +83,22 @@ export default function CostingList() {
     [searched, statusFilter]
   );
 
+  // Pipeline totals. Cancelled orders don't count. `value` is on the OFFER basis to match the
+  // table's ราคาเสนอ/มูลค่าออเดอร์ columns — the offered price per garment × จำนวนสั่ง, falling
+  // back to the computed ราคาขาย for orders with no offer entered yet. `offered` counts how many
+  // rows carried a real offer, so the card can say how much of the figure is quoted vs. computed.
   const totals = useMemo(() => {
-    let pieces = 0, cost = 0, value = 0;
-    // Cancelled orders don't count toward pipeline value.
+    let pieces = 0, cost = 0, value = 0, offered = 0, valued = 0;
     for (const { c, bd, costed } of priced) {
       if ((c.status || "quote") === "cancelled") continue;
-      pieces += Number(c.order_qty) || 0;
-      if (costed) {
-        cost += bd.totalCost * (Number(c.order_qty) || 0);
-        value += bd.sellingPrice * (Number(c.order_qty) || 0);
-      }
+      const qty = Number(c.order_qty) || 0;
+      const offer = Number(c.offer_price) || 0;
+      pieces += qty;
+      if (costed) cost += bd.totalCost * qty;
+      if (offer > 0) { value += offer * qty; offered++; valued++; }
+      else if (costed) { value += bd.sellingPrice * qty; valued++; }
     }
-    return { pieces, cost, value };
+    return { pieces, cost, value, offered, valued };
   }, [priced]);
 
   const { page, setPage, totalPages, pageItems, rangeStart, rangeEnd, total } = usePagination(filtered, query + "|" + statusFilter);
@@ -137,7 +141,8 @@ export default function CostingList() {
         <StatCard label="ออเดอร์ทั้งหมด" value={rows.length.toLocaleString()} />
         <StatCard label="จำนวนตัวรวม" value={fmt0(totals.pieces)} sub="ไม่รวมที่ยกเลิก" />
         <StatCard label="ต้นทุนรวม" value={`฿${fmt0(totals.cost)}`} sub="เฉพาะที่คิดต้นทุนแล้ว" />
-        <StatCard label="มูลค่าขายรวม" value={`฿${fmt0(totals.value)}`} sub="เฉพาะที่คิดต้นทุนแล้ว" />
+        <StatCard label="มูลค่าเสนอรวม" value={`฿${fmt0(totals.value)}`}
+          sub={totals.offered < totals.valued ? `ราคาเสนอ ${totals.offered}/${totals.valued} ออเดอร์ · ที่เหลือใช้ราคาขายที่คำนวณ` : "ตามราคาเสนอ"} />
       </div>
 
       <div className="card">
@@ -177,7 +182,7 @@ export default function CostingList() {
                   <th>กำหนดส่ง</th>
                   <th className="num">จำนวนสั่ง</th>
                   <th className="num">ต้นทุน/ตัว</th>
-                  <th className="num">ราคาขาย/ตัว</th>
+                  <th className="num">ราคาเสนอ/ตัว</th>
                   <th className="num">มูลค่าออเดอร์</th>
                   <th />
                 </tr>
@@ -195,8 +200,25 @@ export default function CostingList() {
                     <td style={{ color: c.due_date ? "var(--text2)" : "var(--text3)" }}>{c.due_date || "—"}</td>
                     <td className="num">{fmt0(Number(c.order_qty))}</td>
                     <td className="num">{costed ? fmt2(bd.totalCost) : "—"}</td>
-                    <td className="num" style={{ color: "var(--accent)", fontWeight: 500 }}>{costed ? fmt2(bd.sellingPrice) : "—"}</td>
-                    <td className="num">{costed ? `฿${fmt0(bd.sellingPrice * (Number(c.order_qty) || 0))}` : "—"}</td>
+                    {/* The offered price (per ตัว) drives both columns — that's the figure actually
+                        quoted to the customer. Falls back to the computed ราคาขาย when no offer has
+                        been entered yet, shown dimmed so the two bases stay tellable apart. */}
+                    {(() => {
+                      const offer = Number(c.offer_price) || 0;
+                      const per = offer > 0 ? offer : (costed ? bd.sellingPrice : 0);
+                      const has = offer > 0 || costed;
+                      return (
+                        <>
+                          <td className="num" style={{ color: offer > 0 ? "var(--accent)" : "var(--text3)", fontWeight: offer > 0 ? 500 : 400 }}
+                            title={offer > 0 ? "ราคาเสนอที่กรอกไว้" : "ยังไม่ได้กรอกราคาเสนอ — แสดงราคาขายที่คำนวณได้"}>
+                            {has ? fmt2(per) : "—"}
+                          </td>
+                          <td className="num" style={{ color: offer > 0 ? "var(--text)" : "var(--text3)" }}>
+                            {has ? `฿${fmt0(per * (Number(c.order_qty) || 0))}` : "—"}
+                          </td>
+                        </>
+                      );
+                    })()}
                     <td className="num" onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                         <Link href={`/costing/${c.id}`}><button className="ghost" style={{ padding: "3px 8px", fontSize: 13 }}>แก้ไข</button></Link>

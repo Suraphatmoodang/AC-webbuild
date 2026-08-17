@@ -7,6 +7,7 @@ import { PRODUCT_OPT, buildComboOptions } from "@/lib/product-spec";
 import { Combo } from "@/lib/combo";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { matchesTokens, searchTokens } from "@/lib/search-match";
 
 function Sel({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
   return (
@@ -53,11 +54,10 @@ export default function ProductsPage() {
   useEffect(() => { if (authed) load(); }, [authed]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
+    const tokens = searchTokens(query);
+    if (!tokens.length) return rows;
     return rows.filter((p) =>
-      [p.style_no, p.description, p.brand, p.product_type, p.product_category, p.product_group]
-        .some((v) => String(v ?? "").toLowerCase().includes(q))
+      matchesTokens(tokens, p.style_no, p.description, p.brand, p.product_type, p.product_category, p.product_group)
     );
   }, [rows, query]);
 

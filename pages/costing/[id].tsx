@@ -91,7 +91,7 @@ type FormState = {
   cut_labor: string; sew_labor: string; qc_labor: string; pack_labor: string;
   output_day: string;      // LEGACY, hidden — carried through so old rows keep the value
   waste_pct: string; overhead_baht: string; overhead_pc: string; profit_pct: string; cutting_loss_pct: string;
-  offer_price: string;   // offered/budget price for the whole order (stored; not in the math)
+  offer_price: string;   // offered/budget price PER GARMENT (stored; not in the math)
   actual_entries: ActualEntryF[];
   note: string;
 };
@@ -937,10 +937,11 @@ export default function CostingEditor() {
             <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>
               กำไรคิดจากราคาขาย: ราคาขาย = ต้นทุน ÷ (1 − กำไร%) — เท่ากับสูตรในสเปรดชีตเดิม
             </div>
-            {/* Order-level offered/budget price — a single figure for the whole order, kept to
-                compare against the computed cost/selling price. Not part of the cost math. */}
+            {/* Offered/budget price, typed PER GARMENT (same basis as ราคาขาย, so the two are
+                directly comparable). The summary shows it × จำนวนสั่ง as the order-level budget.
+                Not part of the cost math. */}
             <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 12 }}>
-              <Field label="ราคาเสนอ/งบ (ทั้งออเดอร์)" hint="ราคาที่เสนอ/งบทั้งออเดอร์ — เก็บไว้เทียบกับต้นทุน/ราคาขายจริง">
+              <Field label="ราคาเสนอ/งบ (ต่อตัว)" hint="ราคาที่เสนอ/งบ ต่อตัว — เก็บไว้เทียบกับต้นทุน/ราคาขายจริง (สรุปจะคูณจำนวนสั่งให้)">
                 <input inputMode="decimal" value={form.offer_price} onChange={(e) => set("offer_price", e.target.value)} placeholder="0" />
               </Field>
               <Field label="หมายเหตุ"><input value={form.note} onChange={(e) => set("note", e.target.value)} /></Field>
@@ -1142,19 +1143,28 @@ export default function CostingEditor() {
                   {offer > 0 && (
                     <>
                       <div style={{ display: "flex", justifyContent: "space-between", paddingTop: orderQty > 0 ? 10 : 0, marginTop: orderQty > 0 ? 10 : 0, borderTop: orderQty > 0 ? "1px solid var(--border)" : "none" }}>
-                        <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ทั้งออเดอร์)</span>
+                        <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ต่อตัว)</span>
                         <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offer)}</span>
                       </div>
                       {orderQty > 0 && (() => {
-                        // Read-only: margin if this offer is accepted = offer − computed order cost.
-                        const margin = offer - bd.totalCost * orderQty;
+                        // The offer is typed PER GARMENT, so the order-level budget is offer × จำนวนสั่ง.
+                        // Margin compares that against the computed order cost — both whole-order figures
+                        // (comparing the per-piece offer against the order cost was the old bug).
+                        const offerTotal = offer * orderQty;
+                        const margin = offerTotal - bd.totalCost * orderQty;
                         return (
-                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
-                            <span style={{ color: "var(--text3)" }}>กำไรถ้ารับราคานี้</span>
-                            <span style={{ fontFamily: "var(--mono)", color: margin >= 0 ? "var(--green)" : "var(--red)" }}>
-                              {margin >= 0 ? "+" : ""}฿{fmt(margin)}
-                            </span>
-                          </div>
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+                              <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ทั้งออเดอร์)</span>
+                              <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offerTotal)}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
+                              <span style={{ color: "var(--text3)" }}>กำไรถ้ารับราคานี้</span>
+                              <span style={{ fontFamily: "var(--mono)", color: margin >= 0 ? "var(--green)" : "var(--red)" }}>
+                                {margin >= 0 ? "+" : ""}฿{fmt(margin)}
+                              </span>
+                            </div>
+                          </>
                         );
                       })()}
                     </>

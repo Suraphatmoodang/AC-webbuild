@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { SELF_OWNER } from "./fabric-store";
+import { matchesQuery } from "./search-match";
 
 // Dropdown for the เจ้าของ (owner) field. A blank value = our own stock; the control
 // shows and offers it as SELF_OWNER (AC) at the top, and picking it clears back to blank
@@ -18,7 +19,7 @@ export function OwnerSelect({ value, onChange, options }: {
 
   const external = value.trim() !== "";
   const display = open ? query : (external ? value : SELF_OWNER);
-  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase()));
+  const filtered = options.filter((o) => matchesQuery(query, o));
   const q = query.trim();
   const canAddNew = q !== "" && !options.some((o) => o.toLowerCase() === q.toLowerCase());
   const pick = (v: string) => { onChange(v); setOpen(false); setQuery(""); };

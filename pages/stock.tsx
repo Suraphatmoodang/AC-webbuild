@@ -6,6 +6,7 @@ import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareAccessory } from "@/lib/sort";
 import { exportAccessoriesXlsx } from "@/lib/stock-export";
+import { matchesQuery } from "@/lib/search-match";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -77,16 +78,7 @@ export default function StockPage() {
     if (showLow && stockOf(i.id) > i.min_quantity) return false;
     if (filterType && i.type !== filterType) return false;
     if (filterCustomer && i.customer !== filterCustomer) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      i.type.toLowerCase().includes(q) ||
-      i.customer.toLowerCase().includes(q) ||
-      i.acc_code.toLowerCase().includes(q) ||
-      i.description.toLowerCase().includes(q) ||
-      i.color.toLowerCase().includes(q) ||
-      i.size.toLowerCase().includes(q)
-    );
+    return matchesQuery(search, i.type, i.customer, i.acc_code, i.description, i.color, i.size);
   }).sort(compareAccessory), [items, lotMap, search, filterType, filterCustomer, showLow]);
 
   const totalValue = items.reduce((s, i) => s + valueOf(i.id), 0);

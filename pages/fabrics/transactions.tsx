@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
+import { matchesQuery } from "@/lib/search-match";
 import { getFabrics, addFabricTransaction, revertFabricTransaction, getFabricTransactionsByFabric,
   getFabricLotMap, getRecorders, stockFromLots, valueFromLots,
   type Fabric, type FabricLot, type FabricTransaction } from "@/lib/fabric-store";
@@ -129,20 +130,8 @@ export default function FabricTransactionsPage() {
     showToast("ย้อนรายการล่าสุดแล้ว ✓", "success");
   };
 
-  const matchSearch = (i: Fabric) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      i.fabric_type.toLowerCase().includes(q) ||
-      i.composition.toLowerCase().includes(q) ||
-      i.construction.toLowerCase().includes(q) ||
-      i.color.toLowerCase().includes(q) ||
-      i.width.toLowerCase().includes(q) ||
-      i.fabric_code.toLowerCase().includes(q) ||
-      i.row_label.toLowerCase().includes(q) ||
-      i.owner.toLowerCase().includes(q)
-    );
-  };
+  const matchSearch = (i: Fabric) =>
+    matchesQuery(search, i.fabric_type, i.composition, i.construction, i.color, i.width, i.fabric_code, i.row_label, i.owner);
   const filtered = useMemo(() => items.filter(matchSearch).sort(compareFabric), [items, search]);
 
   const searching = search.trim().length > 0;

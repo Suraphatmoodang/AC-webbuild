@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
+import { matchesQuery } from "@/lib/search-match";
 import { getFabrics, addFabric, updateFabric, deleteFabric, getSuppliers, bulkDeleteFabrics,
   bulkDeactivateFabrics, getFabricLotMap, stockFromLots, valueFromLots, createFabricLot, overwriteFabricStock,
   type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
@@ -46,7 +47,7 @@ function Combobox({ value, onChange, options, placeholder, hasError }: {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
   useEffect(() => { setQuery(value); }, [value]);
-  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase()));
+  const filtered = options.filter((o) => matchesQuery(query, o));
   const select = (opt: string) => { onChange(opt); setQuery(opt); setOpen(false); };
   return (
     <div style={{ position: "relative" }}>
@@ -102,7 +103,7 @@ function SupplierCombobox({ value, onChange, options }: {
   const [query, setQuery] = useState("");
   const selectedName = options.find((o) => o.id === value)?.name ?? "";
   const display = open ? query : selectedName;
-  const filtered = options.filter((o) => o.name.toLowerCase().includes(query.toLowerCase()));
+  const filtered = options.filter((o) => matchesQuery(query, o.name));
   const select = (id: string) => { onChange(id); setOpen(false); setQuery(""); };
   const clear = () => { onChange(null); setQuery(""); setOpen(false); };
   return (
@@ -234,20 +235,8 @@ export default function FabricManagePage() {
   const filtered = useMemo(() => items.filter((i) => {
     if (!showInactive && !i.is_active) return false;
     if (filterType && i.fabric_type !== filterType) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    const supName = (suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "").toLowerCase();
-    return (
-      i.fabric_type.toLowerCase().includes(q) ||
-      i.composition.toLowerCase().includes(q) ||
-      i.construction.toLowerCase().includes(q) ||
-      i.color.toLowerCase().includes(q) ||
-      i.width.toLowerCase().includes(q) ||
-      i.fabric_code.toLowerCase().includes(q) ||
-      i.row_label.toLowerCase().includes(q) ||
-      i.owner.toLowerCase().includes(q) ||
-      supName.includes(q)
-    );
+    const supName = suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "";
+    return matchesQuery(search, i.fabric_type, i.composition, i.construction, i.color, i.width, i.fabric_code, i.row_label, i.owner, supName);
   }).sort(compareFabric), [items, suppliers, search, filterType, showInactive]);
 
   const pg = usePagination(filtered, `${search}|${filterType}|${showInactive}`);

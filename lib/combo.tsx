@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { matchesTokens, searchTokens } from "./search-match";
 
 // A "type-or-pick" dropdown for the garment-spec fields on /costing/products and
 // /costing/[id]. Behaves like a normal <select> — click to see the full option list
@@ -32,7 +33,10 @@ export function Combo({
   }, [open]);
 
   const q = (filter ?? "").trim().toLowerCase();
-  const shown = q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
+  // Filtering is tokenised (every word must appear, any order); the "is this a NEW value"
+  // test below stays an EXACT comparison — that decides whether typing adds a new entry.
+  const tokens = searchTokens(q);
+  const shown = tokens.length ? options.filter((o) => matchesTokens(tokens, o)) : options;
   const isNew = q.length > 0 && !options.some((o) => o.toLowerCase() === q);
 
   const pick = (v: string) => { onChange(v); setFilter(null); setOpen(false); };

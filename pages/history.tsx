@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getAccessories, getTransactions, getTransactionsByAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Transaction, type Lot } from "@/lib/store";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { matchesQuery } from "@/lib/search-match";
 
 const TX_LABELS: Record<string, { th: string; cls: string }> = {
   IN:     { th: "รับเข้า",   cls: "badge-in"     },
@@ -25,7 +26,7 @@ function Combobox({ value, onChange, options, placeholder, minWidth = 200 }: {
   // When closed, show the selected label; when open/typing, show the query
   const display = open ? query : selectedLabel;
 
-  const filtered = options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()));
+  const filtered = options.filter((o) => matchesQuery(query, o.label));
 
   const select = (v: string) => { onChange(v); setOpen(false); setQuery(""); };
 
@@ -116,17 +117,7 @@ export default function HistoryPage() {
     // In ledger view, show every transaction for the item — no search/type filtering
     if (view === "ledger") return true;
     if (filterType && acc.type !== filterType) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        acc.type.toLowerCase().includes(q) ||
-        acc.description.toLowerCase().includes(q) ||
-        t.reference_no.toLowerCase().includes(q) ||
-        t.note.toLowerCase().includes(q) ||
-        t.created_by.toLowerCase().includes(q)
-      );
-    }
-    return true;
+    return matchesQuery(search, acc.type, acc.description, t.reference_no, t.note, t.created_by);
   });
 
   const selectedAcc = selectedItem ? accMap[selectedItem] : null;

@@ -4,6 +4,7 @@ import { getSuppliers, addSupplier, updateSupplier, deleteSupplier, bulkDeleteSu
 import { useRequireAccess, type Section } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { matchesQuery } from "@/lib/search-match";
 
 type FormData = Omit<Supplier, "id" | "created_at" | "updated_at">;
 
@@ -66,19 +67,8 @@ export function SuppliersView({ api, section }: { api: SupplierApi; section: Sec
 
   const refresh = () => api.list().then(setItems);
 
-  const filtered = items.filter((i) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      i.supplier_name.toLowerCase().includes(q) ||
-      i.supplier_code.toLowerCase().includes(q) ||
-      i.contact_person.toLowerCase().includes(q) ||
-      i.contact_number.toLowerCase().includes(q) ||
-      i.contact_email.toLowerCase().includes(q) ||
-      i.city.toLowerCase().includes(q) ||
-      i.tax_id.toLowerCase().includes(q)
-    );
-  });
+  const filtered = items.filter((i) =>
+    matchesQuery(search, i.supplier_name, i.supplier_code, i.contact_person, i.contact_number, i.contact_email, i.city, i.tax_id));
 
   const pg = usePagination(filtered, search);
 

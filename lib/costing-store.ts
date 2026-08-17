@@ -73,7 +73,7 @@ import { getFabrics, getFabricLotMap } from "./fabric-store";
 //     overhead_pc numeric not null default 0,   -- โสหุ้ย/ตัว (baht per piece, typed directly)
 //     profit_pct numeric not null default 10,
 //     cutting_loss_pct numeric not null default 5,
-//     offer_price numeric not null default 0,   -- offered/budget price for the WHOLE order (kept for budget-vs-actual; not in the cost math). Add via: alter table product_costings add column offer_price numeric not null default 0
+//     offer_price numeric not null default 0,   -- offered/budget price PER GARMENT (kept for budget-vs-actual; not in the cost math). Add via: alter table product_costings add column offer_price numeric not null default 0
 //     actual_entries jsonb not null default '[]',   -- Phase D: hand-logged actual costs
 //     note text not null default '',
 //     created_by text not null default '',
@@ -257,7 +257,8 @@ export type ProductCosting = {
   overhead_pc: number;   // โสหุ้ย/ตัว (baht per piece)
   profit_pct: number;
   cutting_loss_pct: number;
-  offer_price: number;   // offered/budget price for the WHOLE order — stored for budget-vs-actual; NOT in the cost math
+  offer_price: number;   // offered/budget price PER GARMENT (same basis as sellingPrice; × order_qty for the
+                         // order-level budget) — stored for budget-vs-actual; NOT in the cost math
   actual_entries: ActualEntry[];   // Phase D: hand-logged actual costs (JSONB)
   note: string;
   created_by: string;

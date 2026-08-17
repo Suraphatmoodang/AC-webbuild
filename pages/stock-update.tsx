@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import * as XLSX from "xlsx";
+import { matchesQuery } from "@/lib/search-match";
 import { buildAccessoryMatchIndex, matchKeyForRow, applyStockUpdates, getSuppliers,
   type Accessory, type Supplier, type UpdatableField } from "@/lib/store";
 import { useRequireAccess } from "@/lib/auth";
@@ -209,10 +210,7 @@ export default function StockUpdatePage() {
   // Visible rows (status filter + search)
   const visible = rows.map((r, i) => ({ r, i })).filter(({ r }) => {
     if (matchFilter !== "all" && r._match !== matchFilter) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return r.type.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) ||
-      r.acc_code.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
+    return matchesQuery(search, r.type, r.description, r.acc_code, r.customer);
   });
 
   const pg = usePagination(visible, `${search}|${matchFilter}`, pageSize);

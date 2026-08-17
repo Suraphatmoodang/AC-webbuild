@@ -6,6 +6,7 @@ import { useRequireAccess } from "@/lib/auth";
 import { SearchInput } from "@/lib/search";
 import { compareAccessory } from "@/lib/sort";
 import { numOr, numInput, DEFAULT_MIN_QTY, type NumField } from "@/lib/form-num";
+import { matchesQuery } from "@/lib/search-match";
 
 const UNITS = ["เส้น","โหล","ชิ้น","ม้วน","หลา","กุรุส","กิโล","หลอด","กิโลกรัม"];
 
@@ -37,7 +38,7 @@ function TypeCombobox({ value, onChange, options, hasError }: {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
   useEffect(() => { setQuery(value); }, [value]);
-  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase()));
+  const filtered = options.filter((o) => matchesQuery(query, o));
   const select = (opt: string) => { onChange(opt); setQuery(opt); setOpen(false); };
   return (
     <div style={{ position: "relative" }}>
@@ -93,7 +94,7 @@ function SupplierCombobox({ value, onChange, options }: {
   const [query, setQuery] = useState("");
   const selectedName = options.find((o) => o.id === value)?.name ?? "";
   const display = open ? query : selectedName;
-  const filtered = options.filter((o) => o.name.toLowerCase().includes(query.toLowerCase()));
+  const filtered = options.filter((o) => matchesQuery(query, o.name));
   const select = (id: string) => { onChange(id); setOpen(false); setQuery(""); };
   const clear = () => { onChange(null); setQuery(""); setOpen(false); };
   return (
@@ -228,18 +229,8 @@ export default function ManagePage() {
   const filtered = useMemo(() => items.filter((i) => {
     if (!showInactive && !i.is_active) return false;
     if (filterType && i.type !== filterType) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    const supName = (suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "").toLowerCase();
-    return (
-      i.type.toLowerCase().includes(q) ||
-      i.customer.toLowerCase().includes(q) ||
-      i.acc_code.toLowerCase().includes(q) ||
-      i.description.toLowerCase().includes(q) ||
-      i.color.toLowerCase().includes(q) ||
-      i.size.toLowerCase().includes(q) ||
-      supName.includes(q)
-    );
+    const supName = suppliers.find((s) => s.id === i.supplier_id)?.supplier_name ?? "";
+    return matchesQuery(search, i.type, i.customer, i.acc_code, i.description, i.color, i.size, supName);
   }).sort(compareAccessory), [items, suppliers, search, filterType, showInactive]);
 
   const pg = usePagination(filtered, `${search}|${filterType}|${showInactive}`);

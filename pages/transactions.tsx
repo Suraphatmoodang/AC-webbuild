@@ -8,6 +8,7 @@ import { Combo } from "@/lib/combo";
 import { SearchInput } from "@/lib/search";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { compareAccessory } from "@/lib/sort";
+import { matchesQuery } from "@/lib/search-match";
 
 type TxType = "IN" | "OUT" | "ADJUST" | "RETURN";
 
@@ -131,18 +132,8 @@ export default function TransactionsPage() {
     showToast("ย้อนรายการล่าสุดแล้ว ✓", "success");
   };
 
-  const matchSearch = (i: Accessory) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      i.type.toLowerCase().includes(q) ||
-      i.customer.toLowerCase().includes(q) ||
-      i.acc_code.toLowerCase().includes(q) ||
-      i.description.toLowerCase().includes(q) ||
-      i.color.toLowerCase().includes(q) ||
-      i.size.toLowerCase().includes(q)
-    );
-  };
+  const matchSearch = (i: Accessory) =>
+    matchesQuery(search, i.type, i.customer, i.acc_code, i.description, i.color, i.size);
   // type → color → size, memoized (can be the full catalog).
   const filtered = useMemo(() => items.filter(matchSearch).sort(compareAccessory), [items, search]);
 

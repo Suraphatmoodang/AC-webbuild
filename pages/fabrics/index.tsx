@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
+import { matchesQuery } from "@/lib/search-match";
 import { getFabrics, getSuppliers, stageFabric, getFabricLotMap, stockFromLots, valueFromLots, SELF_OWNER,
   type Fabric, type Supplier, type FabricImportRow, type FabricLot } from "@/lib/fabric-store";
 import { useSession, roleCan } from "@/lib/auth";
@@ -85,18 +86,7 @@ export default function FabricStockPage() {
     if (ownFilter === "ours" && isExternal(i)) return false;
     if (ownFilter === "external" && !isExternal(i)) return false;
     if (ownFilter.startsWith("o:") && i.owner !== ownFilter.slice(2)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      i.fabric_type.toLowerCase().includes(q) ||
-      i.composition.toLowerCase().includes(q) ||
-      i.construction.toLowerCase().includes(q) ||
-      i.color.toLowerCase().includes(q) ||
-      i.width.toLowerCase().includes(q) ||
-      i.fabric_code.toLowerCase().includes(q) ||
-      i.row_label.toLowerCase().includes(q) ||
-      i.owner.toLowerCase().includes(q)
-    );
+    return matchesQuery(search, i.fabric_type, i.composition, i.construction, i.color, i.width, i.fabric_code, i.row_label, i.owner);
   }).sort(compareFabric), [items, lotMap, search, filterType, showLow, ownFilter]);
 
   const totalValue = items.reduce((s, i) => s + valueOf(i.id), 0);

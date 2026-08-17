@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
+import { matchesQuery } from "@/lib/search-match";
 import { getApprovedFabricImports, getFabricTransactions, getFabrics, getSuppliers,
   getFabricLotMap, valueFromLots,
   type FabricImportRow, type FabricTransaction, type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
@@ -73,11 +74,7 @@ export default function FabricAdminLogPage() {
   const filteredEvents = events.filter((e) => {
     if (kindFilter !== "all" && e.kind !== kindFilter) return false;
     if (txFilter !== "all" && (e.kind !== "transaction" || e.txType !== txFilter)) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return e.label.toLowerCase().includes(q) || e.detail.toLowerCase().includes(q);
-    }
-    return true;
+    return matchesQuery(search, e.label, e.detail);
   });
 
   const pg = usePagination(filteredEvents, `${kindFilter}|${txFilter}|${search}`);
