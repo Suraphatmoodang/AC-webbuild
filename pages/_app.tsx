@@ -58,11 +58,12 @@ const NAV_COSTING: NavItem[] = [
   // { href: "/costing/trends", label: "แนวโน้ม", en: "Trends" },
 ];
 
-// Leads (ลูกค้าทัก) is a fourth standalone section — a sales pipeline, not inventory.
+// Leads (ลีดลูกค้า) is a fourth standalone section — a sales pipeline, not inventory.
 // Like costing it has no ops/admin split: the pages gate themselves (super-only), so
 // these items carry no `area`.
 const NAV_LEADS: NavItem[] = [
   { href: "/leads", label: "กระดาน", en: "Board" },
+  { href: "/leads/trends", label: "แนวโน้ม", en: "Trends" },
   { href: "/leads/import", label: "นำเข้า", en: "Import" },
 ];
 
@@ -79,7 +80,7 @@ const TITLES = {
   acc:     { code: "ACC",     word: "STOCK",     href: "/stock" },
   fabric:  { code: "ผ้า",     word: "FABRIC",    href: "/fabrics" },
   costing: { code: "ต้นทุน",  word: "COSTING",   href: "/costing" },
-  leads:   { code: "ลูกค้า",  word: "LEADS",     href: "/leads" },
+  leads:   { code: "ลีด",     word: "LEADS",     href: "/leads" },
   none:    { code: "Apparel", word: "Creations", href: "/" },
 } as const;
 

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import * as XLSX from "xlsx";
-import { readRole } from "@/lib/auth";
 import { parseLeadSheet, EXPECTED_HEADERS } from "@/lib/lead-sheet";
 import { addLeadsBulk, getLeads, statusMeta, type LeadInput } from "@/lib/lead-store";
 
@@ -13,7 +12,6 @@ import { addLeadsBulk, getLeads, statusMeta, type LeadInput } from "@/lib/lead-s
 
 export default function LeadImportPage() {
   const router = useRouter();
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<LeadInput[]>([]);
   const [fileName, setFileName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -24,20 +22,13 @@ export default function LeadImportPage() {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3500);
   };
 
-  useEffect(() => {
-    const r = readRole();
-    if (!r) { router.replace("/login"); return; }
-    if (r !== "super") { router.replace("/"); return; }
-    setAuthed(true);
-  }, [router]);
-
   // Existing lead codes power the duplicate check in the preview.
+  // Ungated like /leads — see the note at the top of pages/leads/index.tsx.
   useEffect(() => {
-    if (!authed) return;
     getLeads()
       .then((ls) => setExistingCodes(new Set(ls.map((l) => l.lead_code.trim()).filter(Boolean))))
       .catch(() => setExistingCodes(new Set()));
-  }, [authed]);
+  }, []);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -83,8 +74,6 @@ export default function LeadImportPage() {
       setSaving(false);
     }
   };
-
-  if (authed !== true) return null;
 
   return (
     <div>

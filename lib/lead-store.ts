@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 
-// Customer leads (ลูกค้าทัก) — a FOURTH standalone section beside อุปกรณ์ / ผ้า / ต้นทุน.
+// Customer leads (ลีดลูกค้า) — a FOURTH standalone section beside อุปกรณ์ / ผ้า / ต้นทุน.
 // It is a sales pipeline, not inventory: one row per inbound enquiry (Facebook / Instagram /
 // TikTok / LINE / Website / walk-in), moved through the shop's 8 stages until it is either
 // won (ได้งาน) or lost (ไม่ได้งาน, with a reason kept for later analysis).

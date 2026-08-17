@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/router";
 import Link from "next/link";
-import { readRole, type Role } from "@/lib/auth";
 import { SearchInput } from "@/lib/search";
 import { LeadDrawer } from "@/lib/lead-drawer";
 import {
@@ -11,8 +9,12 @@ import {
   type Lead, type LeadInput, type LeadLogEntry,
 } from "@/lib/lead-store";
 
-// กระดานลูกค้าทัก — the sales pipeline board. Replaces a browser-local prototype + the
-// factory's Excel sheet with one shared, Supabase-backed board. Super-admin only (like /costing).
+// กระดานลีดลูกค้า — the sales pipeline board. Replaces a browser-local prototype + the
+// factory's Excel sheet with one shared, Supabase-backed board.
+//
+// UNGATED, and deliberately separate from the stock/order sections: leads are their own
+// standalone site area, reached by URL only (no card on the landing page). No readRole /
+// redirect here — anyone with the link gets the board.
 //
 // Two views over the same filtered set: a KANBAN board (drag a card to change its stage, which
 // writes an automatic log line) and a TABLE for scanning/exporting. Editing happens in a
@@ -30,9 +32,6 @@ function StatCard({ label, value, warn }: { label: string; value: number; warn?:
 }
 
 export default function LeadsPage() {
-  const router = useRouter();
-  const [role, setRole] = useState<Role | null>(null);
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -53,18 +52,11 @@ export default function LeadsPage() {
   const [qName, setQName] = useState("");
   const [qChannel, setQChannel] = useState(LEAD_CHANNELS[0]);
 
-  useEffect(() => {
-    const r = readRole();
-    if (!r) { router.replace("/login"); return; }
-    if (r !== "super") { router.replace("/"); return; }   // leads: super-admin only
-    setRole(r); setAuthed(true);
-  }, [router]);
-
   const load = () => {
     setLoading(true);
     getLeads().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
   };
-  useEffect(() => { if (authed) load(); }, [authed]);
+  useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -118,7 +110,7 @@ export default function LeadsPage() {
     try {
       const input = emptyLeadInput({
         customer_name: name, channel: qChannel, lead_code: nextLeadCode(rows),
-        log: [{ ts: nowStamp(), text: "ลูกค้าทักเข้ามา" }],
+        log: [{ ts: nowStamp(), text: "ลูกค้าติดต่อเข้ามา" }],
       });
       const saved = await addLead(input);
       setRows((rs) => [saved, ...rs]);
@@ -160,21 +152,20 @@ export default function LeadsPage() {
       .concat(filtered.map((d) => COLS.map((c) => cq(c[1](d))).join(","))).join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    a.download = `ลูกค้าทัก_${todayISO()}.csv`;
+    a.download = `ลีดลูกค้า_${todayISO()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     notify("ส่งออกแล้ว — เปิดใน Excel ได้เลย");
   };
 
-  if (authed !== true) return null;
   const openLead = rows.find((r) => r.id === openId) ?? null;
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 500 }}>กระดานลูกค้าทัก</h1>
-          <div style={{ fontSize: 14, color: "var(--text3)" }}>ติดตามลูกค้าที่ทักเข้ามา ตั้งแต่รับเรื่องจนปิดการขาย</div>
+          <h1 style={{ fontSize: 22, fontWeight: 500 }}>กระดานลีดลูกค้า</h1>
+          <div style={{ fontSize: 14, color: "var(--text3)" }}>ติดตามลูกค้าที่ติดต่อเข้ามา ตั้งแต่รับเรื่องจนปิดการขาย</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportCsv}>ส่งออก CSV</button>
@@ -207,7 +198,7 @@ export default function LeadsPage() {
 
       <div className="stat-grid" style={{ display: "grid", gap: 10, marginBottom: 14 }}>
         <StatCard label="ลูกค้าทั้งหมด" value={stats.all} />
-        <StatCard label="ทักเข้ามาวันนี้" value={stats.today} />
+        <StatCard label="ลีดใหม่วันนี้" value={stats.today} />
         <StatCard label="7 วันล่าสุด" value={stats.week} />
         <StatCard label="ต้องติดตาม" value={stats.due} warn />
         <StatCard label="ยังเปิดอยู่" value={stats.open} />
@@ -216,14 +207,14 @@ export default function LeadsPage() {
 
       {/* Quick add — the fast path when a message comes in; opens the drawer to fill the rest. */}
       <div className="card" style={{ padding: 10, marginBottom: 12, borderLeft: "4px solid var(--accent)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 500, fontSize: 14, whiteSpace: "nowrap" }}>ทักเข้ามาใหม่</span>
+        <span style={{ fontWeight: 500, fontSize: 14, whiteSpace: "nowrap" }}>ลีดใหม่</span>
         <input value={qName} onChange={(e) => setQName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") quickAdd(); }}
           placeholder="ชื่อลูกค้า / ชื่อในแชท" style={{ flex: 1, minWidth: 170 }} />
         <select value={qChannel} onChange={(e) => setQChannel(e.target.value)} style={{ width: "auto", minWidth: 130 }}>
           {LEAD_CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <button className="primary" onClick={quickAdd} style={{ whiteSpace: "nowrap" }}>บันทึกเวลานี้</button>
+        <button className="primary" onClick={quickAdd} style={{ whiteSpace: "nowrap" }}>บันทึก</button>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
@@ -264,7 +255,7 @@ export default function LeadsPage() {
       ) : rows.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)" }}>
           <b style={{ display: "block", fontSize: 16, color: "var(--text)", marginBottom: 5 }}>ยังไม่มีลูกค้าในกระดาน</b>
-          เริ่มจากช่อง “ทักเข้ามาใหม่” ด้านบน หรือกด “นำเข้า Excel”
+          เริ่มจากช่อง “ลีดใหม่” ด้านบน หรือกด “นำเข้า Excel”
         </div>
       ) : filtered.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)" }}>
