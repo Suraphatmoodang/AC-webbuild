@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  getLeads, LEAD_STATUSES, LEAD_CHANNELS, LEAD_OWNERS, LOST_REASONS,
+  getLeads, LEAD_STATUSES, LEAD_CHANNELS, LOST_REASONS,
   isClosed, isDue, type Lead,
 } from "@/lib/lead-store";
 
@@ -17,6 +17,15 @@ import {
 // Everything here is DERIVED from the rows at render time — no stored aggregates, matching
 // the app's derive-don't-store rule. Money is deliberately NOT charted: target_price and qty
 // are free text on purpose ("300-500", "แล้วแต่แบบ"), so summing them would invent precision.
+//
+// Two shapes only, chosen by what the data IS: months are TIME, so they run left→right as
+// columns (a trend you can see in one look); everything else is categories compared against
+// each other, so they stay horizontal bars where long Thai labels have room to breathe.
+//
+// แบบใหม่ / แบบเดิม toggle: the column chart and the drop-off funnel are a judgement call that
+// only real, populated data can settle, so the previous all-horizontal-bars layout is kept as
+// a switch (remembered per browser) rather than deleted. The two views read the SAME derived
+// numbers — only the presentation differs. Drop the "classic" branches once one has won.
 
 const fmt0 = (v: number) => (isFinite(v) ? v : 0).toLocaleString("th-TH", { maximumFractionDigits: 0 });
 const pct = (n: number, d: number) => (d > 0 ? `${((n / d) * 100).toFixed(0)}%` : "—");
@@ -34,18 +43,59 @@ const monthLabel = (key: string) => {
 };
 
 // A horizontal-bar row (dependency-free — no charting library anywhere in this project).
-function BarRow({ label, value, max, right, color }: {
-  label: string; value: number; max: number; right: string; color?: string;
+// The two numbers on the right are SEPARATE grid cells with fixed widths, so counts line up
+// under counts and percentages under percentages; as one free-form string they came out
+// ragged and could not be scanned down the column.
+function BarRow({ label, value, max, note, color, title }: {
+  label: string; value: number; max: number; note?: string; color?: string; title?: string;
 }) {
   const w = max > 0 && value > 0 ? Math.max(2, (value / max) * 100) : 0;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(90px, 150px) 1fr auto", gap: 10, alignItems: "center", padding: "5px 0" }}>
+    <div title={title}
+      style={{ display: "grid", gridTemplateColumns: "minmax(84px, 148px) 1fr 40px 78px", gap: 10, alignItems: "center", padding: "5px 0" }}>
       <div style={{ fontSize: 13, color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={label}>{label}</div>
       <div style={{ background: "var(--bg3)", borderRadius: 3, height: 16, overflow: "hidden" }}>
         <div style={{ width: `${w}%`, height: "100%", background: color ?? "var(--accent)", borderRadius: 3, transition: "width .2s" }} />
       </div>
-      <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: "var(--text2)", whiteSpace: "nowrap" }}>{right}</div>
+      <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: "var(--text2)", textAlign: "right" }}>{fmt0(value)}</div>
+      <div style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--text3)", textAlign: "right", whiteSpace: "nowrap" }}>{note ?? ""}</div>
     </div>
+  );
+}
+
+// Months as columns. Heights are in PIXELS off a fixed plot height rather than percentages:
+// the count sits above each column as a sibling, so a percentage-height bar would push the
+// tallest column out of the plot area.
+const PLOT_H = 132;
+
+function MonthColumns({ data, max }: { data: { key: string; count: number; won: number }[]; max: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, overflowX: "auto", paddingTop: 4 }}>
+      {data.map((d) => {
+        const h = max > 0 && d.count > 0 ? Math.max(3, Math.round((d.count / max) * PLOT_H)) : 0;
+        const wonH = d.count > 0 ? Math.round((d.won / d.count) * 100) : 0;
+        return (
+          <div key={d.key} style={{ flex: "1 1 0", minWidth: 30, display: "flex", flexDirection: "column", alignItems: "center" }}
+            title={`${monthLabel(d.key)} · ลีด ${d.count} · ได้งาน ${d.won}`}>
+            <div style={{ height: PLOT_H, width: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center" }}>
+              <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--text3)", marginBottom: 3 }}>{d.count || ""}</span>
+              <div style={{ width: "100%", maxWidth: 46, height: h, background: "var(--accent)", borderRadius: "3px 3px 0 0", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+                {d.won > 0 && <div style={{ height: `${wonH}%`, background: "var(--green)", borderRadius: wonH >= 100 ? "3px 3px 0 0" : 0 }} />}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6, whiteSpace: "nowrap" }}>{monthLabel(d.key)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Swatch({ color, children }: { color: string; children: React.ReactNode }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text3)" }}>
+      <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />{children}
+    </span>
   );
 }
 
@@ -85,13 +135,26 @@ function countBy(rows: Lead[], pick: (l: Lead) => string, presets: string[]): [s
 
 const MONTHS_SHOWN = 12;
 
+// The pipeline as an ordered path. ไม่ได้งาน is not a step on it — a lead can drop out at any
+// stage — so it is counted separately below the funnel instead of as its own bar.
+const STAGES = LEAD_STATUSES.filter((st) => st.key !== "lost");
+
 export default function LeadTrends() {
   const [rows, setRows] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  // Starts on แบบใหม่; a saved choice is read after mount so the server-rendered markup matches.
+  const [chart, setChart] = useState<"new" | "classic">("new");
 
   useEffect(() => {
     getLeads().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
+    const saved = localStorage.getItem("leadTrendsChart");
+    if (saved === "classic" || saved === "new") setChart(saved);
   }, []);
+
+  const pickChart = (v: "new" | "classic") => {
+    setChart(v);
+    try { localStorage.setItem("leadTrendsChart", v); } catch { /* private mode — the choice just won't stick */ }
+  };
 
   const s = useMemo(() => {
     const all = rows.length;
@@ -112,10 +175,23 @@ export default function LeadTrends() {
     }
     const months = Array.from(byMonth.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .slice(-MONTHS_SHOWN);
+      .slice(-MONTHS_SHOWN)
+      .map(([key, v]) => ({ key, ...v }));
 
-    // Funnel — fixed stage order so it reads as a pipeline, not a ranking.
-    const funnel = LEAD_STATUSES.map((st) => ({
+    // Funnel — where leads DROP OFF, which is the question a pipeline chart is for. Only the
+    // current stage is stored, so "reached this stage" is inferred from the stage order: a lead
+    // sitting at ประเมินราคา must have been through กำลังคุย. Leads closed as ไม่ได้งาน left the
+    // path at an unrecorded point, so they are excluded rather than guessed at.
+    const stageIdx = new Map<string, number>(STAGES.map((st, i) => [st.key, i]));
+    const live = rows.filter((l) => l.status !== "lost");
+    const funnel = STAGES.map((st, i) => ({
+      ...st,
+      reached: live.filter((l) => (stageIdx.get(l.status || "new") ?? 0) >= i).length,
+      here: rows.filter((l) => (l.status || "new") === st.key).length,
+    }));
+
+    // แบบเดิม's pipeline: simply how many sit in each stage right now, ไม่ได้งาน included.
+    const byStatus = LEAD_STATUSES.map((st) => ({
       ...st, count: rows.filter((l) => (l.status || "new") === st.key).length,
     }));
 
@@ -127,24 +203,17 @@ export default function LeadTrends() {
       }))
       .sort((a, b) => b.count - a.count);
 
-    const owners = countBy(rows, (l) => l.owner, LEAD_OWNERS)
-      .map(([k, v]) => ({
-        key: k, count: v,
-        won: rows.filter((l) => bucket(l.owner) === k && l.status === "won").length,
-      }))
-      .sort((a, b) => b.count - a.count);
-
     const products = countBy(rows, (l) => l.product_type, []).sort((a, b) => b[1] - a[1]);
     const lostReasons = countBy(rows.filter((l) => l.status === "lost"), (l) => l.lost_reason, LOST_REASONS)
       .sort((a, b) => b[1] - a[1]);
 
-    return { all, won, lost, open, due, closed, months, funnel, channels, owners, products, lostReasons };
+    return { all, won, lost, open, due, closed, months, funnel, byStatus, channels, products, lostReasons };
   }, [rows]);
 
-  const maxMonth = Math.max(1, ...s.months.map(([, v]) => v.count));
-  const maxFunnel = Math.max(1, ...s.funnel.map((f) => f.count));
+  const maxMonth = Math.max(1, ...s.months.map((m) => m.count));
+  const maxFunnel = Math.max(1, ...s.funnel.map((f) => f.reached));
+  const maxStatus = Math.max(1, ...s.byStatus.map((f) => f.count));
   const maxChannel = Math.max(1, ...s.channels.map((c) => c.count));
-  const maxOwner = Math.max(1, ...s.owners.map((o) => o.count));
   const maxProduct = Math.max(1, ...s.products.map(([, v]) => v));
   const maxLost = Math.max(1, ...s.lostReasons.map(([, v]) => v));
 
@@ -155,7 +224,20 @@ export default function LeadTrends() {
           <h1 style={{ fontSize: 22, fontWeight: 500 }}>แนวโน้มลีดลูกค้า</h1>
           <div style={{ fontSize: 14, color: "var(--text3)" }}>ภาพรวมลีดที่เข้ามา · ช่องทาง · อัตราปิดการขาย</div>
         </div>
-        <Link href="/leads"><button>← กลับไปกระดาน</button></Link>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--r)", overflow: "hidden" }}>
+            {([["new", "แบบใหม่"], ["classic", "แบบเดิม"]] as const).map(([v, th]) => (
+              <button key={v} onClick={() => pickChart(v)}
+                style={{
+                  border: "none", borderRadius: 0, padding: "7px 14px",
+                  background: chart === v ? "var(--text)" : "var(--bg2)", color: chart === v ? "#fff" : "var(--text3)",
+                }}>
+                {th}
+              </button>
+            ))}
+          </div>
+          <Link href="/leads"><button>← กลับไปกระดาน</button></Link>
+        </div>
       </div>
 
       {loading ? (
@@ -178,34 +260,54 @@ export default function LeadTrends() {
               sub="เลยวันนัดติดตาม" />
           </div>
 
-          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))" }}>
-            <Panel title="ลีดใหม่ต่อเดือน" hint={`${MONTHS_SHOWN} เดือนล่าสุดที่มีข้อมูล · นับตามวันที่รับเรื่อง`}>
-              {s.months.map(([k, v]) => (
-                <BarRow key={k} label={monthLabel(k)} value={v.count} max={maxMonth}
-                  right={v.won > 0 ? `${fmt0(v.count)} · ได้งาน ${v.won}` : fmt0(v.count)} />
-              ))}
-            </Panel>
+          {/* แบบใหม่: the month trend is the headline — full width, and the only time axis. */}
+          {chart === "new" && (
+            <div style={{ marginBottom: 14 }}>
+              <Panel title="ลีดใหม่ต่อเดือน" hint={`${MONTHS_SHOWN} เดือนล่าสุดที่มีข้อมูล · นับตามวันที่รับเรื่อง`}>
+                <MonthColumns data={s.months} max={maxMonth} />
+                <div style={{ display: "flex", gap: 14, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                  <Swatch color="var(--accent)">ลีดที่เข้ามา</Swatch>
+                  <Swatch color="var(--green)">ปิดได้งาน</Swatch>
+                </div>
+              </Panel>
+            </div>
+          )}
 
-            <Panel title="สถานะในไปป์ไลน์" hint="เรียงตามลำดับขั้น ไม่ใช่ตามจำนวน">
-              {s.funnel.map((f) => (
-                <BarRow key={f.key} label={f.th} value={f.count} max={maxFunnel}
-                  right={`${fmt0(f.count)} · ${pct(f.count, s.all)}`} color={f.color} />
-              ))}
-            </Panel>
+          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))" }}>
+            {/* แบบเดิม: months sit in the grid as one more horizontal-bar panel. */}
+            {chart === "classic" && (
+              <Panel title="ลีดใหม่ต่อเดือน" hint={`${MONTHS_SHOWN} เดือนล่าสุดที่มีข้อมูล · นับตามวันที่รับเรื่อง`}>
+                {s.months.map((m) => (
+                  <BarRow key={m.key} label={monthLabel(m.key)} value={m.count} max={maxMonth}
+                    note={m.won > 0 ? `ได้ ${m.won}` : ""} />
+                ))}
+              </Panel>
+            )}
+
+            {chart === "new" ? (
+              <Panel title="ไปป์ไลน์ · ผ่านแต่ละขั้น" hint="กี่รายไปถึงขั้นนั้น และเหลือกี่ % จากขั้นก่อนหน้า (ไม่รวมที่ปิดเป็นไม่ได้งาน)">
+                {s.funnel.map((f, i) => (
+                  <BarRow key={f.key} label={f.th} value={f.reached} max={maxFunnel} color={f.color}
+                    note={i === 0 ? "" : `→ ${pct(f.reached, s.funnel[i - 1].reached)}`}
+                    title={`${f.th} · ไปถึงขั้นนี้ ${f.reached} ราย · ค้างอยู่ขั้นนี้ตอนนี้ ${f.here} ราย`} />
+                ))}
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--text3)" }}>
+                  ปิดเป็น “ไม่ได้งาน” {fmt0(s.lost)} ราย ({pct(s.lost, s.all)} ของทั้งหมด) — หล่นออกได้ทุกขั้น จึงไม่นับรวมในแท่งด้านบน
+                </div>
+              </Panel>
+            ) : (
+              <Panel title="สถานะในไปป์ไลน์" hint="เรียงตามลำดับขั้น ไม่ใช่ตามจำนวน">
+                {s.byStatus.map((f) => (
+                  <BarRow key={f.key} label={f.th} value={f.count} max={maxStatus} color={f.color}
+                    note={pct(f.count, s.all)} />
+                ))}
+              </Panel>
+            )}
 
             <Panel title="ตามช่องทาง" hint="ลีดที่เข้ามา และกี่รายที่ปิดได้">
               {s.channels.map((c) => (
-                <BarRow key={c.key} label={c.key} value={c.count} max={maxChannel}
-                  right={`${fmt0(c.count)} · ได้ ${c.won} (${pct(c.won, c.count)})`} color="#2563eb" />
-              ))}
-            </Panel>
-
-            <Panel title="ตามผู้รับผิดชอบ">
-              {s.owners.length === 0 ? (
-                <div style={{ fontSize: 13, color: "var(--text3)" }}>ยังไม่ได้ระบุผู้รับผิดชอบ</div>
-              ) : s.owners.map((o) => (
-                <BarRow key={o.key} label={o.key} value={o.count} max={maxOwner}
-                  right={`${fmt0(o.count)} · ได้ ${o.won} (${pct(o.won, o.count)})`} color="#7c3aed" />
+                <BarRow key={c.key} label={c.key} value={c.count} max={maxChannel} color="#2563eb"
+                  note={`ได้ ${c.won} · ${pct(c.won, c.count)}`} />
               ))}
             </Panel>
 
@@ -213,7 +315,7 @@ export default function LeadTrends() {
               {s.products.length === 0 ? (
                 <div style={{ fontSize: 13, color: "var(--text3)" }}>ยังไม่มีข้อมูลประเภทสินค้า</div>
               ) : s.products.map(([k, v]) => (
-                <BarRow key={k} label={k} value={v} max={maxProduct} right={fmt0(v)} color="#d97706" />
+                <BarRow key={k} label={k} value={v} max={maxProduct} color="#d97706" note={pct(v, s.all)} />
               ))}
             </Panel>
 
@@ -221,7 +323,7 @@ export default function LeadTrends() {
               {s.lostReasons.length === 0 ? (
                 <div style={{ fontSize: 13, color: "var(--text3)" }}>ยังไม่มีลีดที่ปิดเป็นไม่ได้งาน</div>
               ) : s.lostReasons.map(([k, v]) => (
-                <BarRow key={k} label={k} value={v} max={maxLost} right={fmt0(v)} color="var(--red)" />
+                <BarRow key={k} label={k} value={v} max={maxLost} color="var(--red)" note={pct(v, s.lost)} />
               ))}
             </Panel>
           </div>

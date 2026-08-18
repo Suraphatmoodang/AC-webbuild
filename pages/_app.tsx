@@ -136,8 +136,10 @@ export default function App({ Component, pageProps }: AppProps) {
             <span style={{ fontFamily: "var(--mono)", fontSize: 20, color: "var(--accent)", fontWeight: 500, letterSpacing: "0.05em" }}>{title.code}</span>
             <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>{title.word}</span>
           </Link>
-          {/* Back to the section picker — only meaningful once inside a section */}
-          {section !== "none" && (
+          {/* Back to the section picker — only meaningful once inside a section, and NOT from
+              leads: that section is standalone (no card on the landing page, no auth gate), so
+              a ⇄ out of it is only ever an accidental press into the stock/order app. */}
+          {section !== "none" && section !== "leads" && (
             <Link href="/" title="เลือกระบบ" aria-label="เลือกระบบ"
               style={{ fontSize: 18, color: "var(--text3)", padding: "2px 6px", lineHeight: 1 }}>
               ⇄

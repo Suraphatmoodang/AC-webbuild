@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { SearchInput } from "@/lib/search";
 import { LeadDrawer } from "@/lib/lead-drawer";
+import { LeadSummary } from "@/lib/lead-summary";
 import {
   getLeads, addLead, updateLead, deleteLead,
   LEAD_STATUSES, LEAD_CHANNELS, LEAD_OWNERS,
@@ -19,6 +20,10 @@ import {
 // Two views over the same filtered set: a KANBAN board (drag a card to change its stage, which
 // writes an automatic log line) and a TABLE for scanning/exporting. Editing happens in a
 // slide-over drawer so the board never loses its place.
+//
+// A click on a card/row opens a read-only SUMMARY first (openId); the editor (editId) is one
+// button away from there. Reading a lead is far more common than changing one, and dropping
+// straight into the full form made every glance look like an edit in progress.
 
 function StatCard({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   return (
@@ -46,7 +51,8 @@ export default function LeadsPage() {
   const [fOwner, setFOwner] = useState("");
   const [fStatus, setFStatus] = useState("");     // set by clicking the pipeline bar
   const [dueOnly, setDueOnly] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);   // summary popup
+  const [editId, setEditId] = useState<string | null>(null);   // editor drawer
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [qName, setQName] = useState("");
@@ -115,7 +121,7 @@ export default function LeadsPage() {
       const saved = await addLead(input);
       setRows((rs) => [saved, ...rs]);
       setQName("");
-      setOpenId(saved.id);
+      setEditId(saved.id);
       notify("บันทึกแล้ว");
     } catch (e: any) { notify(e.message ?? "บันทึกไม่สำเร็จ", "error"); }
   };
@@ -127,6 +133,7 @@ export default function LeadsPage() {
       await deleteLead(id);
       setRows((rs) => rs.filter((r) => r.id !== id));
       setOpenId(null);
+      setEditId(null);
       notify("ลบแล้ว");
     } catch (e: any) { notify(e.message ?? "ลบไม่สำเร็จ", "error"); }
   };
@@ -159,6 +166,7 @@ export default function LeadsPage() {
   };
 
   const openLead = rows.find((r) => r.id === openId) ?? null;
+  const editLead = rows.find((r) => r.id === editId) ?? null;
 
   return (
     <div>
@@ -210,8 +218,10 @@ export default function LeadsPage() {
         <span style={{ fontWeight: 500, fontSize: 14, whiteSpace: "nowrap" }}>ลีดใหม่</span>
         <input value={qName} onChange={(e) => setQName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") quickAdd(); }}
-          placeholder="ชื่อลูกค้า / ชื่อในแชท" style={{ flex: 1, minWidth: 170 }} />
-        <select value={qChannel} onChange={(e) => setQChannel(e.target.value)} style={{ width: "auto", minWidth: 130 }}>
+          placeholder="ชื่อลูกค้า / ชื่อในแชท" style={{ flex: 2, minWidth: 170 }} />
+        {/* Both fields grow (2:1) so they fill the middle of the bar between the ลีดใหม่ label
+            and the button, instead of the dropdown sitting shrink-to-fit against the button. */}
+        <select value={qChannel} onChange={(e) => setQChannel(e.target.value)} style={{ flex: 1, minWidth: 130 }}>
           {LEAD_CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <button className="primary" onClick={quickAdd} style={{ whiteSpace: "nowrap" }}>บันทึก</button>
@@ -347,10 +357,18 @@ export default function LeadsPage() {
         </div>
       )}
 
-      <LeadDrawer
-        lead={openLead}
+      <LeadSummary
+        lead={editLead ? null : openLead}
         onClose={() => setOpenId(null)}
-        onSave={async (id, patch) => { await patchLead(id, patch, "บันทึกแล้ว"); setOpenId(null); }}
+        onEdit={() => { setEditId(openId); setOpenId(null); }}
+        onDelete={removeLead}
+        onLogChange={async (id, log) => { await patchLead(id, { log }); }}
+      />
+
+      <LeadDrawer
+        lead={editLead}
+        onClose={() => setEditId(null)}
+        onSave={async (id, patch) => { await patchLead(id, patch, "บันทึกแล้ว"); setEditId(null); }}
         onDelete={removeLead}
         onLogChange={async (id, log) => { await patchLead(id, { log }); }}
       />
