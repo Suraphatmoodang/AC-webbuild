@@ -67,12 +67,19 @@ const NAV_LEADS: NavItem[] = [
   { href: "/leads/import", label: "นำเข้า", en: "Import" },
 ];
 
+// QC scan station (ตรวจ QC) — a fifth standalone section. One workstation = one scanner +
+// one fixed barcode sheet; the page gates itself (login required), so no `area` here either.
+const NAV_QC: NavItem[] = [
+  { href: "/qc", label: "สถานีตรวจ", en: "Station" },
+];
+
 // "/" is the section picker and "/login" belongs to neither — both render bare
 // (logo only, no nav). Everything under /fabrics is the fabric section.
-function sectionFor(pathname: string): "acc" | "fabric" | "costing" | "leads" | "none" {
+function sectionFor(pathname: string): "acc" | "fabric" | "costing" | "leads" | "qc" | "none" {
   if (pathname === "/" || pathname === "/login") return "none";
   if (pathname.startsWith("/costing")) return "costing";
   if (pathname.startsWith("/leads")) return "leads";
+  if (pathname.startsWith("/qc")) return "qc";
   return pathname.startsWith("/fabrics") ? "fabric" : "acc";
 }
 
@@ -81,6 +88,7 @@ const TITLES = {
   fabric:  { code: "ผ้า",     word: "FABRIC",    href: "/fabrics" },
   costing: { code: "ต้นทุน",  word: "COSTING",   href: "/costing" },
   leads:   { code: "ลีด",     word: "LEADS",     href: "/leads" },
+  qc:      { code: "QC",      word: "STATION",   href: "/qc" },
   none:    { code: "Apparel", word: "Creations", href: "/" },
 } as const;
 
@@ -99,7 +107,8 @@ export default function App({ Component, pageProps }: AppProps) {
   const authed = role !== null;
   const section = sectionFor(router.pathname);
   const nav = section === "fabric" ? NAV_FABRIC : section === "acc" ? NAV_ACC
-    : section === "costing" ? NAV_COSTING : section === "leads" ? NAV_LEADS : [];
+    : section === "costing" ? NAV_COSTING : section === "leads" ? NAV_LEADS
+    : section === "qc" ? NAV_QC : [];
   // Nav visibility:
   //  · public items (no `area`) always show — viewing stock never needs a login.
   //  · LOGGED OUT: gated items still show, so clicking one is what triggers the

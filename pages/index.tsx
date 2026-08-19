@@ -263,6 +263,23 @@ export default function HomePage() {
       )}
       */}
 
+      {/* QC scan station — anyone logged in can run a station (it's shop-floor work). */}
+      {role && (
+        <Link href="/qc" className="card home-card"
+          style={{ display: "block", padding: 20, marginTop: 16, transition: "border-color 0.15s, transform 0.15s" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 21, fontWeight: 500 }}>ตรวจ QC</div>
+              <div style={{ fontSize: 15, color: "var(--text3)", letterSpacing: "0.04em" }}>QC scan station</div>
+            </div>
+            <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap" }}>ตัวอย่างหน้าจอ</span>
+          </div>
+          <div style={{ fontSize: 14, color: "var(--text2)", marginTop: 8 }}>
+            ยิงบาร์โค้ด 1 ครั้งต่อ 1 ตัว นับยอดผ่าน/ตำหนิสด ๆ พร้อมจับเวลาและเทียบกับเป้าหมายของงาน
+          </div>
+        </Link>
+      )}
+
       <div style={{ textAlign: "center", marginTop: 28, fontSize: 14, color: "var(--text3)" }}>
         ซัพพลายเออร์ใช้ฐานข้อมูลเดียวกันทั้งสองระบบ · Suppliers are shared between both systems
       </div>

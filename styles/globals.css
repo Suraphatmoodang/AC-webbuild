@@ -359,3 +359,52 @@ tr:hover td { background: var(--bg3); }
   .lead-drawer-b .form-grid-2 { grid-template-columns: 1fr; }
   .lead-seam-lab { display: none; }
 }
+
+/* ── QC scan station (/qc) ─────────────────────────────────────────────
+   Read across a workbench, not a desk: the counter is deliberately huge and the
+   side rail (scanner echo + the printed barcode sheet) collapses under the board
+   on tablets so a phone/tablet at the station still shows the count first. */
+.qc-grid { display: grid; grid-template-columns: 1fr 340px; gap: 14px; align-items: start; }
+
+.qc-count {
+  font-family: var(--mono); font-size: 76px; line-height: 1.1;
+  letter-spacing: -0.02em; margin: 10px 0 8px;
+}
+.qc-bar { height: 10px; background: var(--bg4); border-radius: 6px; overflow: hidden; }
+.qc-bar > span { display: block; height: 100%; transition: width 0.25s ease; }
+
+.qc-pace {
+  color: #fff; font-size: 13px; padding: 3px 10px; border-radius: 5px;
+  letter-spacing: 0.04em; white-space: nowrap;
+}
+
+/* One tile per fault barcode — as many as the sheet has. */
+.qc-faults { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+
+/* Last-scan echo: the operator's only confirmation that the beep counted. */
+.qc-echo {
+  border: 2px solid var(--border); border-radius: var(--r);
+  background: var(--bg3); padding: 12px 14px; min-height: 92px;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+}
+
+/* On-screen stand-ins for the printed barcodes (mock-up only). */
+.qc-key { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; background: var(--bg2); }
+.qc-key:disabled { opacity: 0.45; cursor: not-allowed; }
+.qc-bars {
+  width: 44px; height: 34px; flex-shrink: 0; border-radius: 2px; background: #fff;
+  background-image: repeating-linear-gradient(90deg, #0f172a 0 2px, transparent 2px 4px, #0f172a 4px 5px, transparent 5px 9px);
+}
+
+.qc-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.qc-dot.on  { background: var(--green); }
+.qc-dot.off { background: var(--red); }
+
+@media (max-width: 1024px) {
+  .qc-grid { grid-template-columns: 1fr; }
+  .qc-count { font-size: 62px; }
+}
+@media (max-width: 560px) {
+  .qc-count { font-size: 48px; }
+  .qc-faults { grid-template-columns: 1fr 1fr; }
+}
