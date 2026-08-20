@@ -283,7 +283,10 @@ tr:hover td { background: var(--bg3); }
   text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.lead-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; align-items: flex-start; }
+/* Grab the board background to pan it sideways (see startPan in pages/leads/index.tsx).
+   Cards keep their own pointer cursor — they are dragged to change stage, not to pan. */
+.lead-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; align-items: flex-start; cursor: grab; overscroll-behavior-x: contain; }
+.lead-board.panning { cursor: grabbing; user-select: none; }
 .lead-col {
   flex: 0 0 272px; background: var(--bg3); border-radius: var(--r); padding: 8px; min-height: 90px;
 }

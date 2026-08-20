@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { SearchInput } from "@/lib/search";
 import { LeadDrawer } from "@/lib/lead-drawer";
@@ -108,6 +108,30 @@ export default function LeadsPage() {
     if (!d || d.status === status) return;
     const entry: LeadLogEntry = { ts: nowStamp(), text: `เปลี่ยนสถานะ: ${statusMeta(d.status).th} → ${statusMeta(status).th}` };
     await patchLead(id, { status, log: [entry, ...d.log], last_contact_date: todayISO() }, `ย้ายไป “${statusMeta(status).th}” แล้ว`);
+  };
+
+  // ── Grab-to-pan the board ──
+  // The columns overflow sideways, and a plain mouse has no horizontal wheel. Holding the board
+  // BACKGROUND (column padding, header strip, the gaps) and dragging scrolls it; a press that
+  // starts on a card is left alone, because a card already owns the HTML5 drag that moves a lead
+  // between stages. Touch is untouched — the native scroll already works there.
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const [panning, setPanning] = useState(false);
+  const startPan = (e: React.MouseEvent) => {
+    const el = boardRef.current;
+    if (!el || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest(".lead-card, button, a, input, select, textarea")) return;
+    const startX = e.clientX;
+    const startLeft = el.scrollLeft;
+    setPanning(true);
+    const move = (ev: MouseEvent) => { el.scrollLeft = startLeft - (ev.clientX - startX); };
+    const up = () => {
+      setPanning(false);
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   };
 
   const quickAdd = async () => {
@@ -272,7 +296,7 @@ export default function LeadsPage() {
           ไม่พบลูกค้าที่ตรงกับตัวกรอง — ลองล้างคำค้นหรือเลือกตัวกรองใหม่
         </div>
       ) : view === "board" ? (
-        <div className="lead-board">
+        <div ref={boardRef} className={`lead-board${panning ? " panning" : ""}`} onMouseDown={startPan}>
           {LEAD_STATUSES.map((st) => {
             const items = filtered.filter((d) => d.status === st.key);
             return (
