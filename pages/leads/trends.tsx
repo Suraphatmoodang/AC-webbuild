@@ -180,7 +180,7 @@ export default function LeadTrends() {
 
     // Funnel — where leads DROP OFF, which is the question a pipeline chart is for. Only the
     // current stage is stored, so "reached this stage" is inferred from the stage order: a lead
-    // sitting at ประเมินราคา must have been through กำลังคุย. Leads closed as ไม่ได้งาน left the
+    // sitting at ส่งต่อเมอร์ must have been through กำลังคุย. Leads closed as ไม่ได้งาน left the
     // path at an unrecorded point, so they are excluded rather than guessed at.
     const stageIdx = new Map<string, number>(STAGES.map((st, i) => [st.key, i]));
     const live = rows.filter((l) => l.status !== "lost");

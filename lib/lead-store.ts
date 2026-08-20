@@ -48,8 +48,8 @@ import { supabase } from "./supabase";
 //   create index if not exists customer_leads_follow_idx on customer_leads (follow_up_date);
 
 // ── Pipeline stages ──────────────────────────────────────────────────
-// The shop's 8 stages, in board order (คู่มือใช้งาน sheet):
-//   ลูกค้าใหม่ → รอติดต่อกลับ → กำลังคุย → นัดหมาย → ส่งต่อเมอร์ → ประเมินราคา → ได้งาน / ไม่ได้งาน
+// The shop's stages, in board order (คู่มือใช้งาน sheet, minus ประเมินราคา which they don't use):
+//   ลูกค้าใหม่ → รอติดต่อกลับ → กำลังคุย → นัดหมาย → ส่งต่อเมอร์ → ได้งาน / ไม่ได้งาน
 // `key` is what's stored; `th` is what's shown. Stored as a key (not the Thai label) so renaming
 // a label later never orphans existing rows.
 export const LEAD_STATUSES = [
@@ -58,7 +58,6 @@ export const LEAD_STATUSES = [
   { key: "talking",   th: "กำลังคุย",     color: "#2563eb" },
   { key: "appointed", th: "นัดหมาย",      color: "#7c3aed" },
   { key: "handoff",   th: "ส่งต่อเมอร์",  color: "#0f766e" },
-  { key: "quoting",   th: "ประเมินราคา",  color: "#0891b2" },
   { key: "won",       th: "ได้งาน",       color: "#16a34a" },
   { key: "lost",      th: "ไม่ได้งาน",    color: "#dc2626" },
 ] as const;
