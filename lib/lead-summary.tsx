@@ -34,13 +34,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function LeadSummary({
-  lead, onClose, onEdit, onDelete, onLogChange,
+  lead, onClose, onEdit, onDelete, onLogChange, onSubcontractChange,
 }: {
   lead: Lead | null;
   onClose: () => void;
   onEdit: () => void;
   onDelete: (id: string) => Promise<void>;
   onLogChange: (id: string, log: LeadLogEntry[]) => Promise<void>;
+  onSubcontractChange: (id: string, value: boolean) => Promise<void>;
 }) {
   const [logText, setLogText] = useState("");
   useEffect(() => { setLogText(""); }, [lead?.id]);
@@ -88,6 +89,7 @@ export function LeadSummary({
             {lead.priority && <span className={`lead-tag${lead.priority === "สูง" ? " hi" : ""}`}>ความสำคัญ {lead.priority}</span>}
             {lead.owner && <span className="lead-tag own">{lead.owner}</span>}
             {lead.channel && <span className="lead-tag">{lead.channel}</span>}
+            {lead.subcontract && <span className="lead-tag sub">งานซับ</span>}
           </div>
 
           <Section title="ผู้ติดต่อ">
@@ -104,6 +106,14 @@ export function LeadSummary({
             <Row label="จำนวน (ตัว)" value={lead.qty} mono />
             <Row label="งบ/ราคาเป้าหมาย" value={lead.target_price ? `฿${lead.target_price}` : ""} mono />
             <Row label="รายละเอียด" value={lead.details && <span style={{ whiteSpace: "pre-wrap" }}>{lead.details}</span>} />
+            {/* The one editable control in this read-only card — a subcontract flag is usually
+                noticed while reading, and saves at once (same rule as a log line). */}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, padding: "8px 0", cursor: "pointer" }}>
+              <input type="checkbox" checked={lead.subcontract}
+                onChange={(ev) => onSubcontractChange(lead.id, ev.target.checked)}
+                style={{ width: "auto", margin: 0, cursor: "pointer" }} />
+              งานซับคอนแทรค
+            </label>
           </Section>
 
           <Section title="การติดตาม">

@@ -287,8 +287,40 @@ tr:hover td { background: var(--bg3); }
    Cards keep their own pointer cursor — they are dragged to change stage, not to pan. */
 .lead-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; align-items: flex-start; cursor: grab; overscroll-behavior-x: contain; }
 .lead-board.panning { cursor: grabbing; user-select: none; }
+/* Each column scrolls INSIDE itself instead of stretching the page: a stage with 60 leads must
+   not push the board's bottom edge (and every other column's drop target) off the screen.
+   The height is a near-full screen (100vh minus the 70px sticky app header and a little air), so
+   once the board is scrolled to, the columns FILL the window — a short cap left the board cramped
+   between the filters and the fold. */
 .lead-col {
-  flex: 0 0 272px; background: var(--bg3); border-radius: var(--r); padding: 8px; min-height: 90px;
+  flex: 0 0 272px; background: var(--bg3); border-radius: var(--r); padding: 0 4px 8px; min-height: 90px;
+  max-height: calc(100vh - 88px); overflow-y: auto;
+  /* Reserve the scrollbar's width in EVERY column, both edges, whether it scrolls or not:
+     otherwise a column that overflows has visibly narrower cards than the one beside it, and
+     cards jump sideways the moment a drop makes a column overflow. */
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin; scrollbar-color: var(--border2) transparent;
+}
+/* Chromium: the same thin, quiet bar as Firefox gets from scrollbar-width/color above. */
+.lead-col::-webkit-scrollbar { width: 8px; }
+.lead-col::-webkit-scrollbar-track { background: transparent; }
+/* The thumb's LENGTH is the browser's to decide (content ÷ viewport) — CSS cannot fix it, only
+   floor it. min-height stops a long column rendering a 6px sliver next to a neighbour's
+   half-height thumb, which is what makes a row of columns look uneven. */
+.lead-col::-webkit-scrollbar-thumb {
+  background: var(--border2); border-radius: 4px; min-height: 44px;
+  border: 2px solid transparent; background-clip: content-box;   /* inset, so it reads as thin */
+}
+.lead-col::-webkit-scrollbar-thumb:hover { background: var(--text3); background-clip: content-box; }
+/* Sticky so you can always see WHICH stage you are dropping into, however far down you scrolled.
+   Full-bleed (negative margin cancels the column's side padding) and opaque, so a card scrolling
+   underneath cannot show a sliver past its edges; the roomy line-height keeps Thai vowel marks
+   (ู, ่) off the clip edge. */
+.lead-col-h {
+  position: sticky; top: 0; z-index: 2; background: var(--bg3);
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 -4px; padding: 10px 8px; line-height: 1.6;
+  box-shadow: 0 4px 6px -5px rgba(15, 23, 42, 0.35);
 }
 .lead-col.over { background: var(--bg4); outline: 2px dashed var(--border2); }
 
@@ -309,6 +341,8 @@ tr:hover td { background: var(--bg3); }
 .lead-tag.own  { background: #e7eef7; border-color: #c6d6e9; color: var(--accent); }
 .lead-tag.due  { background: var(--red2); border-color: #edbdb6; color: var(--red); font-weight: 600; }
 .lead-tag.hi   { background: #fef3c7; border-color: #fcd34d; color: #b45309; font-weight: 600; }
+/* งานซับคอนแทรค — violet, the same "belongs to someone else" colour the fabric owner chip uses. */
+.lead-tag.sub  { background: #f3e8ff; border-color: #d8b4fe; color: #7c3aed; font-weight: 600; }
 
 /* Detail editor — a CENTRED modal. It was a right-hand slide-over, but at 480px against the
    screen edge the two-column form was cramped and awkward to fill. Centring it and widening
@@ -353,7 +387,8 @@ tr:hover td { background: var(--bg3); }
 
 /* Phones: columns nearly full-width so one is readable at a time; drawer takes the screen. */
 @media (max-width: 640px) {
-  .lead-col { flex: 0 0 82vw; }
+  /* The app header wraps to ~2 rows on phones, so more of the screen is spoken for. */
+  .lead-col { flex: 0 0 82vw; max-height: calc(100vh - 140px); }
   /* Phones: the modal goes back to filling the screen — a centred box with margins
      would only waste width on the narrowest device. */
   .lead-drawer { width: 100%; height: 100%; border-radius: 0; }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Combo } from "./combo";
 import {
   LEAD_STATUSES, LEAD_CHANNELS, LEAD_OWNERS, LEAD_PRIORITIES, LEAD_PRODUCT_TYPES, LOST_REASONS,
-  daysOverdue, nowStamp, statusMeta,
+  daysOverdue, nowStamp, statusMeta, findLeadDuplicates, duplicateSummary, DUP_FIELD_TH,
   type Lead, type LeadInput, type LeadLogEntry,
 } from "./lead-store";
 
@@ -37,9 +37,10 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 }
 
 export function LeadDrawer({
-  lead, onClose, onSave, onDelete, onLogChange,
+  lead, allLeads, onClose, onSave, onDelete, onLogChange,
 }: {
   lead: Lead | null;
+  allLeads: Lead[];              // the whole board — only to warn about duplicate ชื่อลูกค้า
   onClose: () => void;
   onSave: (id: string, patch: Partial<LeadInput>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -64,8 +65,15 @@ export function LeadDrawer({
   const set = <K extends keyof Lead>(k: K, v: Lead[K]) => setDraft({ ...draft, [k]: v });
   const overdue = daysOverdue(draft.follow_up_date);
   const meta = statusMeta(draft.status);
+  // Open leads matching this one by ชื่อ / เบอร์ / LINE — flagged, never blocked (see lead-store).
+  // `hit` says which fields collided, so only those fields turn red.
+  const dups = findLeadDuplicates(allLeads, draft, lead.id);
+  const hit = new Set(dups.flatMap((d) => d.on));
+  const dupRed = (f: "name" | "phone" | "line") => (hit.has(f) ? { borderColor: "var(--red)" } : undefined);
 
   const save = async () => {
+    if (dups.length > 0 &&
+      !confirm(`ข้อมูลนี้ซ้ำกับลูกค้าที่ยังเปิดอยู่ ${dups.length} รายการ:\n\n${duplicateSummary(dups)}\n\nบันทึกต่อไปหรือไม่?`)) return;
     setSaving(true);
     try {
       const { id, created_at, updated_at, ...patch } = draft;
@@ -101,9 +109,29 @@ export function LeadDrawer({
         </div>
 
         <div className="lead-drawer-b">
+          {/* One strip for every kind of collision — the matching fields below are outlined red.
+              Closed leads are never counted, so a returning customer raises nothing. */}
+          {dups.length > 0 && (
+            <div style={{
+              background: "var(--red2)", border: "1px solid #edbdb6", borderRadius: "var(--r)",
+              padding: "8px 11px", marginBottom: 14, fontSize: 13, color: "var(--red)",
+            }}>
+              <b>ซ้ำกับลูกค้าที่ยังเปิดอยู่ {dups.length} รายการ</b>
+              <div style={{ marginTop: 3, color: "var(--text2)" }}>
+                {dups.slice(0, 3).map((d) => (
+                  <div key={d.lead.id}>
+                    {d.lead.lead_code || "(ไม่มีรหัส)"} · {d.lead.customer_name || "—"} · {statusMeta(d.lead.status).th}
+                    <span style={{ color: "var(--text3)" }}> — ตรงกันที่{d.on.map((f) => DUP_FIELD_TH[f]).join(" / ")}</span>
+                  </div>
+                ))}
+                {dups.length > 3 && <div>…อีก {dups.length - 3} รายการ</div>}
+              </div>
+            </div>
+          )}
           <Group title="ผู้ติดต่อ">
             <Field label="ชื่อลูกค้า" full>
-              <input value={draft.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="เช่น คุณเมย์" />
+              <input value={draft.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="เช่น คุณเมย์"
+                style={dupRed("name")} />
             </Field>
             <Field label="บริษัท / องค์กร" full>
               <input value={draft.company} onChange={(e) => set("company", e.target.value)} />
@@ -114,8 +142,8 @@ export function LeadDrawer({
             <Field label="Contact / Link" hint="m.me/… หรือ @ig">
               <input value={draft.contact_link} onChange={(e) => set("contact_link", e.target.value)} />
             </Field>
-            <Field label="LINE ID"><input value={draft.line_id} onChange={(e) => set("line_id", e.target.value)} /></Field>
-            <Field label="เบอร์โทร"><input value={draft.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
+            <Field label="LINE ID"><input value={draft.line_id} onChange={(e) => set("line_id", e.target.value)} style={dupRed("line")} /></Field>
+            <Field label="เบอร์โทร"><input value={draft.phone} onChange={(e) => set("phone", e.target.value)} style={dupRed("phone")} /></Field>
             <Field label="อีเมล"><input value={draft.email} onChange={(e) => set("email", e.target.value)} /></Field>
             <Field label="ตำแหน่ง"><input value={draft.job_title} onChange={(e) => set("job_title", e.target.value)} /></Field>
           </Group>
@@ -133,6 +161,15 @@ export function LeadDrawer({
             <Field label="วันที่นัดหมาย">
               <input type="date" value={s(draft.appointment_date)} onChange={(e) => set("appointment_date", e.target.value || null)} />
             </Field>
+            {/* งานซับคอนแทรค — a plain flag, not a stage: it says WHERE the work comes from
+                (we produce for another factory/brand), which cuts across every pipeline stage. */}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: "pointer" }}>
+                <input type="checkbox" checked={draft.subcontract} onChange={(e) => set("subcontract", e.target.checked)}
+                  style={{ width: "auto", margin: 0, cursor: "pointer" }} />
+                งานซับคอนแทรค
+              </label>
+            </div>
             <Field label="รายละเอียดเบื้องต้น" full>
               <textarea value={draft.details} onChange={(e) => set("details", e.target.value)} rows={3} style={{ resize: "vertical" }} />
             </Field>

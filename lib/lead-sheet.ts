@@ -30,6 +30,7 @@ const FIELDS: Record<string, string[]> = {
   merchandiser:      ["Merchandiser", "เมอร์"],
   target_price:      ["งบ/ราคาเป้าหมาย", "งบ", "ราคาเป้าหมาย"],
   lost_reason:       ["เหตุผลไม่ได้งาน"],
+  subcontract:       ["งานซับคอนแทรค", "งานซับ", "ซับคอนแทรค", "Subcontract"],
   note:              ["หมายเหตุ", "Note"],
 };
 
@@ -80,6 +81,15 @@ function channelOf(v: any): string {
   if (!t) return "";
   const hit = LEAD_CHANNELS.find((c) => c.toLowerCase() === t.toLowerCase());
   return hit ?? (LEAD_CHANNELS.includes("อื่นๆ") ? "อื่นๆ" : t);
+}
+
+// งานซับคอนแทรค is a yes/no column the sheet may not have at all: anything ticked/affirmative
+// counts, everything else (including a blank column) is false.
+const TRUEISH = ["ใช่", "y", "yes", "true", "1", "x", "✓", "งานซับ", "subcontract"];
+function boolOf(v: any): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  return TRUEISH.includes(str(v).toLowerCase());
 }
 
 export type LeadResolvedColumns = { index: Record<string, number>; missing: string[] };
@@ -137,6 +147,7 @@ export function parseLeadSheet(raw: any[][]): { rows: LeadInput[]; cols: LeadRes
       merchandiser: str(g(r, "merchandiser")),
       target_price: str(g(r, "target_price")),
       lost_reason: str(g(r, "lost_reason")),
+      subcontract: boolOf(g(r, "subcontract")),
       note: noteText,
       // Seed the conversation log from หมายเหตุ so imported rows aren't blank on the board.
       log: noteText ? [{ ts: `${received ?? new Date().toISOString().slice(0, 10)}T09:00`, text: noteText }] : [],

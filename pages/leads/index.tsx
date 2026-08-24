@@ -7,6 +7,7 @@ import {
   getLeads, addLead, updateLead, deleteLead,
   LEAD_STATUSES, LEAD_CHANNELS, LEAD_OWNERS,
   statusMeta, daysOverdue, isDue, isClosed, emptyLeadInput, nextLeadCode, nowStamp, todayISO,
+  findLeadDuplicates, duplicateSummary,
   type Lead, type LeadInput, type LeadLogEntry,
 } from "@/lib/lead-store";
 
@@ -51,6 +52,7 @@ export default function LeadsPage() {
   const [fOwner, setFOwner] = useState("");
   const [fStatus, setFStatus] = useState("");     // set by clicking the pipeline bar
   const [dueOnly, setDueOnly] = useState(false);
+  const [fSub, setFSub] = useState<"" | "yes" | "no">("");   // งานซับคอนแทรค
   const [openId, setOpenId] = useState<string | null>(null);   // summary popup
   const [editId, setEditId] = useState<string | null>(null);   // editor drawer
   const [dragId, setDragId] = useState<string | null>(null);
@@ -71,13 +73,15 @@ export default function LeadsPage() {
       if (fOwner && d.owner !== fOwner) return false;
       if (fStatus && d.status !== fStatus) return false;
       if (dueOnly && !isDue(d)) return false;
+      if (fSub === "yes" && !d.subcontract) return false;
+      if (fSub === "no" && d.subcontract) return false;
       if (!q) return true;
       return [d.lead_code, d.customer_name, d.company, d.phone, d.line_id, d.email,
         d.details, d.product_type, d.note, d.contact_link, d.merchandiser]
         .concat(d.log.map((l) => l.text))
         .join(" ").toLowerCase().includes(q);
     });
-  }, [rows, query, fChannel, fOwner, fStatus, dueOnly]);
+  }, [rows, query, fChannel, fOwner, fStatus, dueOnly, fSub]);
 
   const stats = useMemo(() => {
     const t = todayISO();
@@ -117,6 +121,7 @@ export default function LeadsPage() {
   // between stages. Touch is untouched — the native scroll already works there.
   const boardRef = useRef<HTMLDivElement | null>(null);
   const [panning, setPanning] = useState(false);
+
   const startPan = (e: React.MouseEvent) => {
     const el = boardRef.current;
     if (!el || e.button !== 0) return;
@@ -134,9 +139,16 @@ export default function LeadsPage() {
     window.addEventListener("mouseup", up);
   };
 
+  // Typing a name that is already OPEN on the board is flagged, not blocked — usually it means
+  // the existing card should be reopened instead. (Only the name is available here; the editor
+  // also checks เบอร์/LINE. Closed leads are skipped, so a returning customer is silent.)
+  const qDups = useMemo(() => findLeadDuplicates(rows, { customer_name: qName }), [rows, qName]);
+
   const quickAdd = async () => {
     const name = qName.trim();
     if (!name) return;
+    if (qDups.length > 0 &&
+      !confirm(`มีลูกค้าชื่อ “${name}” ที่ยังเปิดอยู่ ${qDups.length} รายการ:\n\n${duplicateSummary(qDups)}\n\nเพิ่มเป็นลีดใหม่อีกรายการหรือไม่?`)) return;
     try {
       const input = emptyLeadInput({
         customer_name: name, channel: qChannel, lead_code: nextLeadCode(rows),
@@ -175,7 +187,8 @@ export default function LeadsPage() {
       ["วันค้างติดตาม", (d) => { const n = daysOverdue(d.follow_up_date); return n === null || n < 0 ? "" : String(n); }],
       ["Priority", (d) => d.priority], ["วันที่นัดหมาย", (d) => d.appointment_date ?? ""],
       ["Merchandiser", (d) => d.merchandiser], ["งบ/ราคาเป้าหมาย", (d) => d.target_price],
-      ["เหตุผลไม่ได้งาน", (d) => d.lost_reason], ["หมายเหตุ", (d) => d.note],
+      ["เหตุผลไม่ได้งาน", (d) => d.lost_reason], ["งานซับคอนแทรค", (d) => (d.subcontract ? "ใช่" : "")],
+      ["หมายเหตุ", (d) => d.note],
       ["บันทึกการคุย", (d) => d.log.map((l) => `[${l.ts}] ${l.text}`).join("\n")],
     ];
     const cq = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -242,13 +255,26 @@ export default function LeadsPage() {
         <span style={{ fontWeight: 500, fontSize: 14, whiteSpace: "nowrap" }}>ลีดใหม่</span>
         <input value={qName} onChange={(e) => setQName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") quickAdd(); }}
-          placeholder="ชื่อลูกค้า / ชื่อในแชท" style={{ flex: 2, minWidth: 170 }} />
+          placeholder="ชื่อลูกค้า / ชื่อในแชท"
+          style={{ flex: 2, minWidth: 170, ...(qDups.length ? { borderColor: "var(--red)" } : null) }} />
         {/* Both fields grow (2:1) so they fill the middle of the bar between the ลีดใหม่ label
             and the button, instead of the dropdown sitting shrink-to-fit against the button. */}
         <select value={qChannel} onChange={(e) => setQChannel(e.target.value)} style={{ flex: 1, minWidth: 130 }}>
           {LEAD_CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <button className="primary" onClick={quickAdd} style={{ whiteSpace: "nowrap" }}>บันทึก</button>
+        {qDups.length > 0 && (
+          <div style={{ flexBasis: "100%", fontSize: 12, color: "var(--red)" }}>
+            ชื่อนี้ยังเปิดอยู่ในกระดาน {qDups.length} รายการ —{" "}
+            {qDups.slice(0, 3).map((d) => (
+              <button key={d.lead.id} className="ghost" onClick={() => setOpenId(d.lead.id)}
+                style={{ padding: "0 4px", fontSize: 12, color: "var(--red)", textDecoration: "underline" }}>
+                {d.lead.lead_code || "(ไม่มีรหัส)"} · {statusMeta(d.lead.status).th}
+              </button>
+            ))}
+            {qDups.length > 3 ? ` …อีก ${qDups.length - 3}` : ""}
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
@@ -261,12 +287,17 @@ export default function LeadsPage() {
           <option value="">ผู้รับผิดชอบทุกคน</option>
           {LEAD_OWNERS.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
+        <select value={fSub} onChange={(e) => setFSub(e.target.value as "" | "yes" | "no")} style={{ width: "auto", minWidth: 140 }}>
+          <option value="">ทุกประเภทงาน</option>
+          <option value="yes">เฉพาะงานซับ</option>
+          <option value="no">ไม่ใช่งานซับ</option>
+        </select>
         <button onClick={() => setDueOnly(!dueOnly)}
           style={dueOnly ? { background: "var(--red)", borderColor: "var(--red)", color: "#fff" } : undefined}>
           ต้องติดตาม{stats.due > 0 ? ` (${stats.due})` : ""}
         </button>
-        {(fStatus || fChannel || fOwner || dueOnly || query) && (
-          <button className="ghost" onClick={() => { setFStatus(""); setFChannel(""); setFOwner(""); setDueOnly(false); setQuery(""); }}>
+        {(fStatus || fChannel || fOwner || dueOnly || fSub || query) && (
+          <button className="ghost" onClick={() => { setFStatus(""); setFChannel(""); setFOwner(""); setDueOnly(false); setFSub(""); setQuery(""); }}>
             ล้างตัวกรอง
           </button>
         )}
@@ -305,7 +336,7 @@ export default function LeadsPage() {
                 onDragOver={(e) => { e.preventDefault(); setOverCol(st.key); }}
                 onDragLeave={() => setOverCol((c) => (c === st.key ? null : c))}
                 onDrop={(e) => { e.preventDefault(); setOverCol(null); if (dragId) moveTo(dragId, st.key); }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "2px 4px 9px" }}>
+                <div className="lead-col-h">
                   <span style={{ width: 9, height: 9, borderRadius: "50%", background: st.color, flexShrink: 0 }} />
                   <b style={{ fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{st.th}</b>
                   <i style={{ fontFamily: "var(--mono)", fontStyle: "normal", fontSize: 12, color: "var(--text2)" }}>{items.length}</i>
@@ -323,6 +354,7 @@ export default function LeadsPage() {
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
                         {d.received_date && <span className="lead-tag mono">{d.received_date.slice(5)}</span>}
                         {d.channel && <span className="lead-tag">{d.channel}</span>}
+                        {d.subcontract && <span className="lead-tag sub">งานซับ</span>}
                         {d.qty && <span className="lead-tag">{d.qty} ตัว</span>}
                         {d.target_price && <span className="lead-tag mono">฿{d.target_price}</span>}
                         {d.priority === "สูง" && <span className="lead-tag hi">ด่วน</span>}
@@ -361,7 +393,10 @@ export default function LeadsPage() {
                     </td>
                     <td>{d.company}</td>
                     <td>{d.channel}</td>
-                    <td>{d.product_type}</td>
+                    <td>
+                      {d.product_type}
+                      {d.subcontract && <span className="lead-tag sub" style={{ marginLeft: d.product_type ? 6 : 0 }}>งานซับ</span>}
+                    </td>
                     <td className="num">{d.qty}</td>
                     <td className="num">{d.target_price}</td>
                     <td>
@@ -387,10 +422,12 @@ export default function LeadsPage() {
         onEdit={() => { setEditId(openId); setOpenId(null); }}
         onDelete={removeLead}
         onLogChange={async (id, log) => { await patchLead(id, { log }); }}
+        onSubcontractChange={async (id, subcontract) => { await patchLead(id, { subcontract }); }}
       />
 
       <LeadDrawer
         lead={editLead}
+        allLeads={rows}
         onClose={() => setEditId(null)}
         onSave={async (id, patch) => { await patchLead(id, patch, "บันทึกแล้ว"); setEditId(null); }}
         onDelete={removeLead}

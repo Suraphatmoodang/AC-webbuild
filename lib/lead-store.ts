@@ -39,6 +39,7 @@ import { supabase } from "./supabase";
 //     merchandiser text not null default '',
 //     target_price text not null default '',       -- งบ/ราคาเป้าหมาย (ต่อตัว)
 //     lost_reason text not null default '',        -- เหตุผลไม่ได้งาน
+//     subcontract boolean not null default false,  -- งานซับคอนแทรค (รับช่วงผลิตต่อ)
 //     note text not null default '',               -- หมายเหตุ
 //     log jsonb not null default '[]',             -- บันทึกการคุย [{ts,text}]
 //     created_at timestamptz not null default now(),
@@ -46,6 +47,9 @@ import { supabase } from "./supabase";
 //   );
 //   create index if not exists customer_leads_status_idx on customer_leads (status);
 //   create index if not exists customer_leads_follow_idx on customer_leads (follow_up_date);
+//
+// If the table was already created before งานซับคอนแทรค existed, add just the column:
+//   alter table customer_leads add column if not exists subcontract boolean not null default false;
 
 // ── Pipeline stages ──────────────────────────────────────────────────
 // The shop's stages, in board order (คู่มือใช้งาน sheet, minus ประเมินราคา which they don't use):
@@ -108,6 +112,7 @@ export type Lead = {
   merchandiser: string;
   target_price: string;
   lost_reason: string;
+  subcontract: boolean;      // งานซับคอนแทรค — เรารับช่วงผลิตต่อจากโรงงาน/แบรนด์อื่น
   note: string;
   log: LeadLogEntry[];
   created_at: string;
@@ -130,7 +135,7 @@ export function emptyLeadInput(over: Partial<LeadInput> = {}): LeadInput {
     channel: LEAD_CHANNELS[0], contact_link: "", line_id: "", phone: "", email: "", job_title: "",
     product_type: "", qty: "", details: "", status: LEAD_STATUSES[0].key, owner: "",
     last_contact_date: todayISO(), follow_up_date: null, priority: "", appointment_date: null,
-    merchandiser: "", target_price: "", lost_reason: "", note: "", log: [],
+    merchandiser: "", target_price: "", lost_reason: "", subcontract: false, note: "", log: [],
     ...over,
   };
 }
@@ -161,6 +166,57 @@ export function nextLeadCode(leads: { lead_code: string }[]): string {
   return `LD-${String(max + 1).padStart(4, "0")}`;
 }
 
+// ── Duplicate leads ──────────────────────────────────────────────────
+// The same person often messages twice (a second FB thread, a re-enquiry a week later), and the
+// board silently ends up with two cards nobody links. Duplicates are NOT blocked — sometimes they
+// are legitimate — only flagged: a red outline while typing and a confirm that can be waved past.
+//
+// Matched on ชื่อ OR เบอร์โทร OR LINE ID. The name alone is weak evidence (two customers really
+// are both "คุณเมย์") while a repeated phone/LINE is near-proof, so all three are checked and the
+// warning names which one hit.
+//
+// CLOSED leads are skipped entirely: a customer who came back months after ได้งาน/ไม่ได้งาน is a
+// NEW enquiry, not a mistake, and warning about it every time would train everyone to ignore the
+// warning that matters.
+export const normName = (v: string) => (v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+// Digits only — 08-1234-5678, 081 234 5678 and 0812345678 are one number. Short/partial entries
+// are ignored (a stray "08" must not match every phone on the board).
+const normPhone = (v: string) => (v ?? "").replace(/\D/g, "");
+const normId = (v: string) => (v ?? "").trim().toLowerCase().replace(/^@/, "");
+
+export type DupField = "name" | "phone" | "line";
+export const DUP_FIELD_TH: Record<DupField, string> = { name: "ชื่อ", phone: "เบอร์โทร", line: "LINE ID" };
+export type LeadDup<T> = { lead: T; on: DupField[] };
+
+type DupProbe = { customer_name?: string; phone?: string; line_id?: string };
+type DupRow = { id?: string; customer_name: string; phone: string; line_id: string; status: string };
+
+export function findLeadDuplicates<T extends DupRow>(
+  leads: T[], probe: DupProbe, exceptId?: string | null,
+): LeadDup<T>[] {
+  const name = normName(probe.customer_name ?? "");
+  const phone = normPhone(probe.phone ?? "");
+  const line = normId(probe.line_id ?? "");
+  const hits: LeadDup<T>[] = [];
+  for (const l of leads) {
+    if (l.id === exceptId || isClosed(l.status)) continue;
+    const on: DupField[] = [];
+    if (name && normName(l.customer_name) === name) on.push("name");
+    if (phone.length >= 8 && normPhone(l.phone) === phone) on.push("phone");
+    if (line.length >= 3 && normId(l.line_id) === line) on.push("line");
+    if (on.length) hits.push({ lead: l, on });
+  }
+  return hits;
+}
+
+// The confirm dialog's body: which leads, where they sit, and what matched.
+export function duplicateSummary(dups: LeadDup<{ lead_code: string; status: string }>[]): string {
+  return dups
+    .slice(0, 4)
+    .map((d) => `• ${d.lead.lead_code || "(ไม่มีรหัส)"} — ${statusMeta(d.lead.status).th} (ตรงกันที่${d.on.map((f) => DUP_FIELD_TH[f]).join(" / ")})`)
+    .join("\n") + (dups.length > 4 ? `\n• …อีก ${dups.length - 4} รายการ` : "");
+}
+
 // ── CRUD ─────────────────────────────────────────────────────────────
 // Stores throw; pages catch and notify (the convention across this app).
 
@@ -183,8 +239,9 @@ export async function getLeads(): Promise<Lead[]> {
 }
 
 // `log` is JSONB — guard against null/garbage so the UI can always map over it.
+// `subcontract` is coerced too: rows inserted before the column existed read back as null.
 function normalize(row: any): Lead {
-  return { ...row, log: Array.isArray(row.log) ? row.log : [] } as Lead;
+  return { ...row, log: Array.isArray(row.log) ? row.log : [], subcontract: !!row.subcontract } as Lead;
 }
 
 export async function getLead(id: string): Promise<Lead | null> {
