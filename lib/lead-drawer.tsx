@@ -50,8 +50,13 @@ export function LeadDrawer({
   const [saving, setSaving] = useState(false);
   const [logText, setLogText] = useState("");
 
-  // Re-seed the draft whenever a different lead is opened (or the row is refreshed).
-  useEffect(() => { setDraft(lead); setLogText(""); }, [lead]);
+  // Re-seed the draft only when a DIFFERENT lead is opened — deliberately keyed on the id, not on
+  // the row object. Adding a log line writes to Supabase at once, which hands this component a
+  // fresh `lead`; re-seeding on that would throw away every unsaved edit in the other fields (you
+  // type a phone number, add a note, and the phone number is gone). The draft's own copy of the
+  // log is kept in step by addLog/delLog instead.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setDraft(lead); setLogText(""); }, [lead?.id]);
 
   // Esc closes, matching the prototype.
   useEffect(() => {
