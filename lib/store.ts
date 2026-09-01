@@ -13,6 +13,11 @@ export type Accessory = {
   unit: string;
   unit_cost: number;
   min_quantity: number;
+  // Stock lock (ล็อกสต็อค) — a floor under the stock, kept for an order. Stock above
+  // it issues normally; at it, OUT/ADJUST is refused until it's unlocked. See lib/reserve.tsx.
+  // Optional on the type until the migration runs (see the ALTERs in that file's notes).
+  reserved_qty?: number | null;
+  reserved_note?: string | null;   // who/what it's kept for (order code / customer)
   supplier_id: string | null;   // FK → suppliers.id
   valuation_method: "fifo" | "lifo";
   is_active: boolean;
@@ -211,6 +216,36 @@ export async function bulkDeleteSuppliers(ids: string[]): Promise<void> {
   }
 }
 
+// ── Stock lock (ล็อกสต็อค) ─────────────────────────────────────
+// Pin a quantity that must stay in stock for an order. Enforced in addTransaction.
+// Requires the migration:
+//   alter table accessories add column if not exists reserved_qty  numeric not null default 0;
+//   alter table accessories add column if not exists reserved_note text    not null default '';
+// Until it runs, locking reports a clear message instead of a raw Postgres error
+// (reads are unaffected — an absent column simply reads as "not locked").
+const MISSING_LOCK_COLUMN = "ยังไม่ได้เพิ่มคอลัมน์ล็อกสต็อคในฐานข้อมูล (reserved_qty / reserved_note) — ติดต่อผู้ดูแลระบบ";
+
+export async function setReservation(
+  accessory_id: string, qty: number, note: string
+): Promise<{ ok: true } | { error: string }> {
+  if (!(qty > 0)) return { error: "จำนวนที่ล็อกต้องมากกว่า 0" };
+  const { error } = await supabase
+    .from("accessories")
+    .update({ reserved_qty: qty, reserved_note: note })
+    .eq("id", accessory_id);
+  if (error) return { error: /reserved_/i.test(error.message) ? MISSING_LOCK_COLUMN : error.message };
+  return { ok: true };
+}
+
+export async function clearReservation(accessory_id: string): Promise<{ ok: true } | { error: string }> {
+  const { error } = await supabase
+    .from("accessories")
+    .update({ reserved_qty: 0, reserved_note: "" })
+    .eq("id", accessory_id);
+  if (error) return { error: /reserved_/i.test(error.message) ? MISSING_LOCK_COLUMN : error.message };
+  return { ok: true };
+}
+
 // ── Transactions ──────────────────────────────────────────────
 
 export async function getTransactions(): Promise<Transaction[]> {
@@ -294,6 +329,25 @@ export async function addTransaction(opts: {
     const before = stockFromLots(lotsBefore);
     let txQty = qty;
     let effect: LotEffect | null = null;   // recorded so the tx can be reverted exactly
+
+    // Stock lock: an item can be pinned at a quantity kept for an order (reserved_qty).
+    // Anything ABOVE that floor issues normally; a movement that would break through it
+    // is refused here — in the store, so no screen can bypass it. Only the two paths that
+    // REMOVE stock are checked (see lib/reserve.tsx for what is deliberately exempt).
+    const reserved = Number((acc as any).reserved_qty ?? 0) || 0;
+    if (reserved > 0 && (type === "OUT" || type === "ADJUST")) {
+      let resultingStock = before;
+      if (type === "OUT") resultingStock = before - qty;
+      else {
+        const target = lotsBefore.find((l) => l.id === opts.lot_id);
+        if (target) resultingStock = before - Number(target.quantity_remaining) + qty;
+      }
+      if (resultingStock < reserved - 1e-9) {
+        const note = String((acc as any).reserved_note ?? "").trim();
+        return { error: `🔒 ล็อกไว้ ${reserved.toLocaleString()} ${acc.unit ?? ""}${note ? ` (${note})` : ""} — `
+          + `เบิกได้สูงสุด ${Math.max(0, before - reserved).toLocaleString()} ${acc.unit ?? ""} กรุณาปลดล็อกก่อน` };
+      }
+    }
 
     if (type === "IN" || type === "RETURN") {
       // Determine effective_date for queue positioning

@@ -19,6 +19,16 @@ type Stat = { items: number; value: number; external?: number; groups?: Grouped[
 
 const NO_CUSTOMER = "ไม่ระบุลูกค้า";
 
+// How the per-customer / per-owner breakdown is ordered. ALPHABETICAL IS THE DEFAULT:
+// the list is used to look a specific name up, and a stable A–Z position is what makes
+// that quick — value order reshuffles the rows every time stock moves. Sorting happens
+// at render (the loaders leave the groups unsorted) so the toggle is instant.
+type SortMode = "alpha" | "value";
+const sortGroups = (groups: Grouped[], mode: SortMode): Grouped[] =>
+  [...groups].sort((x, y) => mode === "value"
+    ? y.value - x.value
+    : x.label.localeCompare(y.label, "th", { numeric: true }));
+
 const SECTIONS: { href: string; section: Section; title: string; en: string; blurb: string }[] = [
   {
     href: "/stock",
@@ -45,6 +55,8 @@ export default function HomePage() {
   // const [leads, setLeads] = useState<{ all: number; due: number } | null>(null);
   // Per-card "show all" toggle, keyed by section href (both cards now have a breakdown list).
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Per-card sort order for that breakdown, same keying. Unset = "alpha" (the default).
+  const [sortBy, setSortBy] = useState<Record<string, SortMode>>({});
 
   const GROUP_PREVIEW = 5;   // how many rows to show before "ดูทั้งหมด"
 
@@ -58,7 +70,8 @@ export default function HomePage() {
     // the accessory card from rendering (and vice versa), so no Promise.all here.
     Promise.all([getAccessoryValueRows(), getLotValueMap()])
       .then(([items, lm]) => {
-        // Group value + item count by customer (blank → NO_CUSTOMER), high value first.
+        // Group value + item count by customer (blank → NO_CUSTOMER). Left unsorted —
+        // the card sorts on render according to its ลำดับ toggle (see sortGroups).
         const by = new Map<string, Grouped>();
         let value = 0;
         for (const a of items) {
@@ -70,15 +83,15 @@ export default function HomePage() {
           cur.value += v;
           by.set(key, cur);
         }
-        const groups = Array.from(by.values()).sort((x, y) => y.value - x.value);
-        setAcc({ items: items.length, value, groups });
+        setAcc({ items: items.length, value, groups: Array.from(by.values()) });
       })
       .catch(() => setAcc({ items: 0, value: 0 }));
 
     Promise.all([getFabricValueRows(), getFabricLotValueMap()])
       .then(([items, lm]) => {
         // Mirror of the accessory card: group value + item count by owner (blank = ours → AC),
-        // high value first; also keep the external (other-factory) total broken out separately.
+        // unsorted (the card's ลำดับ toggle decides); the external (other-factory) total is
+        // still kept broken out separately.
         const by = new Map<string, Grouped>();
         let value = 0, external = 0;
         for (const f of items) {
@@ -92,8 +105,7 @@ export default function HomePage() {
           cur.value += v;
           by.set(key, cur);
         }
-        const groups = Array.from(by.values()).sort((x, y) => y.value - x.value);
-        setFab({ items: items.length, value, external, groups });
+        setFab({ items: items.length, value, external, groups: Array.from(by.values()) });
       })
       .catch(() => setFab({ items: 0, value: 0 }));
   }, []);
@@ -182,10 +194,13 @@ export default function HomePage() {
                     </div>
                     {/* Value/items broken down by the side's label field — ลูกค้า (accessories)
                         or เจ้าของ (fabrics). Same layout on both cards for consistency. */}
-                    {st.groups && st.groups.length > 0 && (
+                    {st.groups && st.groups.length > 0 && (() => {
+                      const mode: SortMode = sortBy[s.href] ?? "alpha";
+                      const sorted = sortGroups(st.groups, mode);
+                      return (
                       <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
                         <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>{s.section === "acc" ? "ตามลูกค้า" : "ตามเจ้าของ"}</div>
-                        {(expanded[s.href] ? st.groups : st.groups.slice(0, GROUP_PREVIEW)).map((g) => (
+                        {(expanded[s.href] ? sorted : sorted.slice(0, GROUP_PREVIEW)).map((g) => (
                           <div key={g.label} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, padding: "2px 0" }}>
                             <span style={{ color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {g.label} <span style={{ color: "var(--text3)" }}>· {g.items.toLocaleString()} รายการ</span>
@@ -203,8 +218,27 @@ export default function HomePage() {
                             {expanded[s.href] ? "ย่อ" : `ดูทั้งหมด (${st.groups.length})`}
                           </button>
                         )}
+
+                        {/* Sort order — LAST element of the summary, so it never pushes the
+                            numbers around. The card is a <Link>, hence preventDefault. */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+                          <span style={{ fontSize: 11, color: "var(--text3)" }}>ลำดับ</span>
+                          {([["alpha", "ก–ฮ"], ["value", "มูลค่า"]] as const).map(([m, label]) => (
+                            <button key={m}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSortBy((prev) => ({ ...prev, [s.href]: m })); }}
+                              style={{
+                                padding: "2px 10px", fontSize: 11, borderRadius: 999, cursor: "pointer",
+                                background: mode === m ? "var(--bg4)" : "transparent",
+                                border: `1px solid ${mode === m ? "var(--accent)" : "var(--border)"}`,
+                                color: mode === m ? "var(--accent)" : "var(--text3)",
+                              }}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    )}
+                      );
+                    })()}
                   </>
                 )}
               </div>

@@ -4,7 +4,9 @@ import { useRequireAccess } from "@/lib/auth";
 import { matchesQuery } from "@/lib/search-match";
 import { getFabrics, addFabric, updateFabric, deleteFabric, getSuppliers, bulkDeleteFabrics,
   bulkDeactivateFabrics, getFabricLotMap, stockFromLots, valueFromLots, createFabricLot, overwriteFabricStock,
+  setReservation, clearReservation,
   type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
+import { LockChip, LockButton, ReserveModal, reservedOf, reserveNoteOf } from "@/lib/reserve";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareFabric } from "@/lib/sort";
@@ -205,6 +207,9 @@ export default function FabricManagePage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkModal, setBulkModal] = useState<null | { blocked: string[] }>(null);
+  // Stock lock (ล็อกสต็อค) — the fabric whose lock is open in the modal.
+  const [lockItem, setLockItem] = useState<Fabric | null>(null);
+  const [lockSaving, setLockSaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -285,6 +290,30 @@ export default function FabricManagePage() {
     } catch (e: any) {
       showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
     } finally { setSaving(false); }
+  };
+
+  // Stock lock — kept OUT of the edit form on purpose: it's an operational flag, not
+  // master data, so it saves on its own (and a form save can never clobber it).
+  const saveLock = async (qty: number, note: string) => {
+    if (!lockItem) return;
+    setLockSaving(true);
+    const res = await setReservation(lockItem.id, qty, note);
+    setLockSaving(false);
+    if ("error" in res) { showToast(res.error, "error"); return; }
+    await refresh();
+    setLockItem(null);
+    showToast(`🔒 ล็อกไว้ ${qty.toLocaleString()} ${lockItem.unit} แล้ว`, "success");
+  };
+
+  const unlock = async () => {
+    if (!lockItem) return;
+    setLockSaving(true);
+    const res = await clearReservation(lockItem.id);
+    setLockSaving(false);
+    if ("error" in res) { showToast(res.error, "error"); return; }
+    await refresh();
+    setLockItem(null);
+    showToast("ปลดล็อกแล้ว — เบิกได้ตามปกติ", "success");
   };
 
   const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
@@ -430,7 +459,14 @@ export default function FabricManagePage() {
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row_label || "—"}</td>
                     <td><OwnerTag owner={item.owner} /></td>
                     <td style={{ fontSize:17, color:"var(--text2)" }}>{suppliers.find((s) => s.id === item.supplier_id)?.supplier_name || "—"}</td>
-                    <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>{stockFromLots(lotMap.get(item.id) ?? []).toLocaleString()}</td>
+                    <td className="num" style={{ fontFamily:"var(--mono)", fontWeight:500 }}>
+                      {stockFromLots(lotMap.get(item.id) ?? []).toLocaleString()}
+                      {reservedOf(item) > 0 && (
+                        <div style={{ marginTop:3 }}>
+                          <LockChip qty={reservedOf(item)} unit={item.unit} note={reserveNoteOf(item)} />
+                        </div>
+                      )}
+                    </td>
                     <td style={{ color:"var(--text2)" }}>{item.unit}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:15 }}>฿{Number(item.unit_cost).toFixed(2)}</td>
                     <td className="num" style={{ fontFamily:"var(--mono)", fontSize:16, color:"var(--text3)" }}>{Number(item.min_quantity).toLocaleString()}</td>
@@ -442,6 +478,7 @@ export default function FabricManagePage() {
                     <td>
                       <div style={{ display:"flex", gap:4 }}>
                         <button className="ghost" style={{ padding:"4px 8px", fontSize:15 }} onClick={() => openEdit(item)}>แก้ไข</button>
+                        <LockButton reserved={reservedOf(item)} onClick={() => setLockItem(item)} />
                         <button className="ghost" style={{ padding:"4px 8px", fontSize:15, color:"var(--red)" }} onClick={() => setDeleteConfirm(item.id)}>ลบ</button>
                       </div>
                     </td>
@@ -714,6 +751,22 @@ export default function FabricManagePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Stock lock editor (ล็อก / ปลดล็อก) */}
+      {lockItem && (
+        <ReserveModal
+          title={`${lockItem.fabric_type} ${lockItem.construction || lockItem.composition}`.trim()}
+          subtitle={[lockItem.color, lockItem.width && `หน้า ${lockItem.width}`, lockItem.fabric_code && `#${lockItem.fabric_code}`].filter(Boolean).join(" · ")}
+          unit={lockItem.unit}
+          stock={stockFromLots(lotMap.get(lockItem.id) ?? [])}
+          reserved={reservedOf(lockItem)}
+          note={reserveNoteOf(lockItem)}
+          saving={lockSaving}
+          onClose={() => setLockItem(null)}
+          onSave={saveLock}
+          onUnlock={unlock}
+        />
       )}
 
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}

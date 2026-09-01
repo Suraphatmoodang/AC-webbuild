@@ -9,6 +9,7 @@ import { SearchInput } from "@/lib/search";
 import { compareFabric } from "@/lib/sort";
 import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
 import { OwnerTag } from "@/lib/owner-tag";
+import { LockChip, reservedOf, reserveNoteOf } from "@/lib/reserve";
 import { OwnerSelect } from "@/lib/owner-select";
 import { exportFabricsXlsx } from "@/lib/stock-export";
 
@@ -228,6 +229,12 @@ export default function FabricStockPage() {
                       <td><OwnerTag owner={item.owner} /></td>
                       <td className="num" style={{ color: isLow ? "var(--accent)" : "var(--text)", fontWeight: isLow ? 500 : 400 }}>
                         {stock.toLocaleString()}
+                        {/* Locked for an order — the surplus above this is still free to issue */}
+                        {reservedOf(item) > 0 && (
+                          <div style={{ marginTop: 3 }}>
+                            <LockChip qty={reservedOf(item)} unit={item.unit} note={reserveNoteOf(item)} />
+                          </div>
+                        )}
                       </td>
                       <td style={{ color: "var(--text2)" }}>{item.unit}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15 }}>

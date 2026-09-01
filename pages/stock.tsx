@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, getSuppliers, stageAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Supplier, type ImportRow, type Lot } from "@/lib/store";
+import { LockChip, reservedOf, reserveNoteOf } from "@/lib/reserve";
 import { useSession, roleCan } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
@@ -186,6 +187,12 @@ export default function StockPage() {
                       <td style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>{item.row ?? "—"}</td>
                       <td className="num" style={{ color: isLow ? "var(--accent)" : "var(--text)", fontWeight: isLow ? 500 : 400 }}>
                         {stock.toLocaleString()}
+                        {/* Locked for an order — the surplus above this is still free to issue */}
+                        {reservedOf(item) > 0 && (
+                          <div style={{ marginTop: 3 }}>
+                            <LockChip qty={reservedOf(item)} unit={item.unit} note={reserveNoteOf(item)} />
+                          </div>
+                        )}
                       </td>
                       <td style={{ color: "var(--text2)" }}>{item.unit}</td>
                       <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 15 }}>

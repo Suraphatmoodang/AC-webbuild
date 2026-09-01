@@ -35,6 +35,11 @@ export type Fabric = {
   unit_cost: number;        // reference price on the fabric (lots hold the real cost)
   cost_unit: string;        // หน่วยที่ราคาอิงอยู่
   min_quantity: number;
+  // Stock lock (ล็อกสต็อค) — mirror of the accessory side. A floor under the stock kept
+  // for an order: stock above it issues normally, at it OUT/ADJUST is refused until it's
+  // unlocked. See lib/reserve.tsx. Optional on the type until the migration runs.
+  reserved_qty?: number | null;
+  reserved_note?: string | null;   // who/what it's kept for (order code / customer)
   owner: string;                // เจ้าของ — factory that owns consignment stock; blank = ours (a label, not identity)
   supplier_id: string | null;   // FK → fabric_suppliers.id (NOT the accessory suppliers table)
   valuation_method: "fifo" | "lifo";
@@ -252,6 +257,33 @@ export async function bulkDeactivateFabrics(ids: string[]): Promise<void> {
   }
 }
 
+// ── Stock lock (ล็อกสต็อค) ─────────────────────────────────────
+// Mirror of the accessory store's helpers. Requires the migration:
+//   alter table fabrics add column if not exists reserved_qty  numeric not null default 0;
+//   alter table fabrics add column if not exists reserved_note text    not null default '';
+const MISSING_LOCK_COLUMN = "ยังไม่ได้เพิ่มคอลัมน์ล็อกสต็อคในฐานข้อมูล (reserved_qty / reserved_note) — ติดต่อผู้ดูแลระบบ";
+
+export async function setReservation(
+  fabric_id: string, qty: number, note: string
+): Promise<{ ok: true } | { error: string }> {
+  if (!(qty > 0)) return { error: "จำนวนที่ล็อกต้องมากกว่า 0" };
+  const { error } = await supabase
+    .from("fabrics")
+    .update({ reserved_qty: qty, reserved_note: note })
+    .eq("id", fabric_id);
+  if (error) return { error: /reserved_/i.test(error.message) ? MISSING_LOCK_COLUMN : error.message };
+  return { ok: true };
+}
+
+export async function clearReservation(fabric_id: string): Promise<{ ok: true } | { error: string }> {
+  const { error } = await supabase
+    .from("fabrics")
+    .update({ reserved_qty: 0, reserved_note: "" })
+    .eq("id", fabric_id);
+  if (error) return { error: /reserved_/i.test(error.message) ? MISSING_LOCK_COLUMN : error.message };
+  return { ok: true };
+}
+
 // ── Transactions ──────────────────────────────────────────────
 
 export async function getFabricTransactions(): Promise<FabricTransaction[]> {
@@ -334,6 +366,23 @@ export async function addFabricTransaction(opts: {
     const before = stockFromLots(lotsBefore);
     let txQty = qty;
     let effect: FabricLotEffect | null = null;   // recorded so the tx can be reverted exactly
+
+    // Stock lock — mirror of the accessory side (see lib/store.ts / lib/reserve.tsx).
+    // Refuse any movement that would take the stock below the quantity kept for an order.
+    const reserved = Number((fab as any).reserved_qty ?? 0) || 0;
+    if (reserved > 0 && (type === "OUT" || type === "ADJUST")) {
+      let resultingStock = before;
+      if (type === "OUT") resultingStock = before - qty;
+      else {
+        const target = lotsBefore.find((l) => l.id === opts.lot_id);
+        if (target) resultingStock = before - Number(target.quantity_remaining) + qty;
+      }
+      if (resultingStock < reserved - 1e-9) {
+        const note = String((fab as any).reserved_note ?? "").trim();
+        return { error: `🔒 ล็อกไว้ ${reserved.toLocaleString()} ${fab.unit ?? ""}${note ? ` (${note})` : ""} — `
+          + `เบิกได้สูงสุด ${Math.max(0, before - reserved).toLocaleString()} ${fab.unit ?? ""} กรุณาปลดล็อกก่อน` };
+      }
+    }
 
     if (type === "IN" || type === "RETURN") {
       let effective = new Date().toISOString();

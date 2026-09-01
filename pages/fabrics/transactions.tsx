@@ -3,8 +3,9 @@ import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import { matchesQuery } from "@/lib/search-match";
 import { getFabrics, addFabricTransaction, revertFabricTransaction, getFabricTransactionsByFabric,
-  getFabricLotMap, getRecorders, stockFromLots, valueFromLots,
+  getFabricLotMap, getRecorders, stockFromLots, valueFromLots, setReservation, clearReservation,
   type Fabric, type FabricLot, type FabricTransaction } from "@/lib/fabric-store";
+import { LockChip, LockButton, ReserveModal, reservedOf, reserveNoteOf, availableOf, shortfallOf } from "@/lib/reserve";
 import { getActiveOrders, statusMeta, type OrderRef } from "@/lib/costing-store";
 import { StockSelect } from "@/lib/stock-select";
 import { Combo } from "@/lib/combo";
@@ -72,6 +73,9 @@ export default function FabricTransactionsPage() {
   const [orders, setOrders] = useState<OrderRef[]>([]);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<null | { q: number; after: number | null; order: OrderRef }>(null);
+  // Stock lock (ล็อกสต็อค) — the fabric whose lock is being edited in the modal.
+  const [lockItem, setLockItem] = useState<Fabric | null>(null);
+  const [lockSaving, setLockSaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -93,6 +97,10 @@ export default function FabricTransactionsPage() {
   const lotsOf = (id: string) => lotMap.get(id) ?? [];
   const stockOf = (id: string) => stockFromLots(lotsOf(id));
   const valueOf = (id: string) => valueFromLots(lotsOf(id));
+  // Locked quantity kept for an order, and what's actually issuable after it.
+  const lockedOf = (i: Fabric) => reservedOf(i);
+  const freeOf = (i: Fabric) => availableOf(stockOf(i.id), lockedOf(i));
+  const shortOf = (i: Fabric) => shortfallOf(stockOf(i.id), lockedOf(i));
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
@@ -128,6 +136,33 @@ export default function FabricTransactionsPage() {
     setItems(fresh); setLotMap(lm);
     setSelected(fresh.find((f) => f.id === selected?.id) ?? null);
     showToast("ย้อนรายการล่าสุดแล้ว ✓", "success");
+  };
+
+  // Save / clear the stock lock, then refresh so every list and the summary agree.
+  const refreshAfterLock = async (msg: string) => {
+    const [fresh, lm] = await Promise.all([getFabrics(), getFabricLotMap()]);
+    setItems(fresh); setLotMap(lm);
+    if (selected) setSelected(fresh.find((f) => f.id === selected.id) ?? null);
+    setLockItem(null);
+    showToast(msg, "success");
+  };
+
+  const saveLock = async (qty: number, note: string) => {
+    if (!lockItem) return;
+    setLockSaving(true);
+    const res = await setReservation(lockItem.id, qty, note);
+    setLockSaving(false);
+    if ("error" in res) { showToast(res.error, "error"); return; }
+    await refreshAfterLock(`🔒 ล็อกไว้ ${qty.toLocaleString()} ${lockItem.unit} แล้ว`);
+  };
+
+  const unlock = async () => {
+    if (!lockItem) return;
+    setLockSaving(true);
+    const res = await clearReservation(lockItem.id);
+    setLockSaving(false);
+    if ("error" in res) { showToast(res.error, "error"); return; }
+    await refreshAfterLock("ปลดล็อกแล้ว — เบิกได้ตามปกติ");
   };
 
   const matchSearch = (i: Fabric) =>
@@ -286,6 +321,11 @@ export default function FabricTransactionsPage() {
                             {stockOf(item.id).toLocaleString()}
                           </span>
                           <span style={{ fontSize: 15, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
+                          {lockedOf(item) > 0 && (
+                            <div style={{ marginTop: 3 }}>
+                              <LockChip qty={lockedOf(item)} unit={item.unit} note={reserveNoteOf(item)} />
+                            </div>
+                          )}
                         </td>
                         <td>{isSel && <span style={{ color: "var(--accent)" }}>▶</span>}</td>
                       </tr>
@@ -357,6 +397,11 @@ export default function FabricTransactionsPage() {
                             {stockOf(item.id).toLocaleString()}
                           </span>
                           <span style={{ fontSize: 15, color: "var(--text3)", marginLeft: 4 }}>{item.unit}</span>
+                          {lockedOf(item) > 0 && (
+                            <div style={{ marginTop: 3 }}>
+                              <LockChip qty={lockedOf(item)} unit={item.unit} note={reserveNoteOf(item)} />
+                            </div>
+                          )}
                         </td>
                         <td>{isSel && <span style={{ color: "var(--accent)" }}>▶</span>}</td>
                       </tr>
@@ -391,6 +436,36 @@ export default function FabricTransactionsPage() {
             )}
           </div>
 
+          {/* Stock lock — sits at the TOP, right under the item: whether stock is spoken
+              for is the first thing you need to know before recording anything against it. */}
+          {selected && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14,
+              padding: "8px 12px", borderRadius: "var(--r)",
+              background: lockedOf(selected) > 0 ? "#fffbeb" : "var(--bg3)",
+              border: `1px solid ${lockedOf(selected) > 0 ? "#fcd34d" : "var(--border)"}`,
+            }}>
+              {lockedOf(selected) > 0
+                ? <LockChip qty={lockedOf(selected)} unit={selected.unit} note={reserveNoteOf(selected)} size="md" />
+                : <span style={{ fontSize: 14, color: "var(--text3)" }}>ไม่ได้ล็อกไว้</span>}
+              {/* Locked above what's in stock → the number that matters is what's still owed,
+                  since รับเข้า fills the lock by itself (see shortfallOf in lib/reserve.tsx). */}
+              {lockedOf(selected) > 0 && (shortOf(selected) > 0 ? (
+                <span style={{ fontSize: 13, color: "#b45309" }}>
+                  ยังขาดอีก <strong style={{ fontFamily: "var(--mono)" }}>{shortOf(selected).toLocaleString()}</strong> {selected.unit}
+                  <span style={{ color: "var(--text3)" }}> · รับเข้าแล้วนับเข้าล็อกนี้เอง</span>
+                </span>
+              ) : (
+                <span style={{ fontSize: 13, color: "var(--text2)" }}>
+                  เบิกได้ <strong style={{ fontFamily: "var(--mono)", color: freeOf(selected) <= 0 ? "var(--red)" : "var(--green)" }}>
+                    {freeOf(selected).toLocaleString()}
+                  </strong> {selected.unit}
+                </span>
+              ))}
+              <LockButton reserved={lockedOf(selected)} onClick={() => setLockItem(selected)} style={{ marginLeft: "auto" }} />
+            </div>
+          )}
+
           <div className="form-row">
             <label className="form-label">ประเภทรายการ · Type</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
@@ -420,6 +495,14 @@ export default function FabricTransactionsPage() {
                   {after.toLocaleString()}
                 </span>
                 <span style={{ color: "var(--text3)" }}>{selected.unit}</span>
+              </div>
+            )}
+            {/* Heads-up before saving — the store refuses this too, but say so early. */}
+            {selected && qty && after !== null && lockedOf(selected) > 0
+              && (txType === "OUT" || txType === "ADJUST") && after < lockedOf(selected) && (
+              <div style={{ marginTop: 6, fontSize: 13, color: "var(--red)" }}>
+                🔒 ต่ำกว่าจำนวนที่ล็อกไว้ ({lockedOf(selected).toLocaleString()} {selected.unit}
+                {reserveNoteOf(selected) ? ` · ${reserveNoteOf(selected)}` : ""}) — ต้องปลดล็อกก่อนจึงจะบันทึกได้
               </div>
             )}
           </div>
@@ -526,6 +609,14 @@ export default function FabricTransactionsPage() {
                   ฿{valueOf(selected.id).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
+              {lockedOf(selected) > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                  <span style={{ color: "var(--text2)" }}>เบิกได้ (หักที่ล็อกไว้)</span>
+                  <span style={{ fontFamily: "var(--mono)", fontWeight: 500, color: freeOf(selected) <= 0 ? "var(--red)" : "var(--green)" }}>
+                    {freeOf(selected).toLocaleString()} {selected.unit}
+                  </span>
+                </div>
+              )}
               <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
                 {lotsOf(selected.id).filter((l) => Number(l.quantity_remaining) > 0).length} ล็อต · วิธี {selected.valuation_method === "lifo" ? "LIFO" : "FIFO"}
               </div>
@@ -617,6 +708,22 @@ export default function FabricTransactionsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Stock lock editor (ล็อก / ปลดล็อก) */}
+      {lockItem && (
+        <ReserveModal
+          title={`${lockItem.fabric_type} ${lockItem.construction || lockItem.composition}`.trim()}
+          subtitle={variantLine(lockItem)}
+          unit={lockItem.unit}
+          stock={stockOf(lockItem.id)}
+          reserved={lockedOf(lockItem)}
+          note={reserveNoteOf(lockItem)}
+          saving={lockSaving}
+          onClose={() => setLockItem(null)}
+          onSave={saveLock}
+          onUnlock={unlock}
+        />
       )}
 
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
