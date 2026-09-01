@@ -32,6 +32,7 @@ export type Area = "ops" | "admin";
 const KEY_AUTH = "manage_auth";   // kept as-is so old sessions//pages don't break
 const KEY_ROLE = "manage_role";
 const KEY_VER  = "manage_session_v";
+const KEY_UPTOK = "manage_upload_token";   // signed token for the image API routes
 
 // ── SESSION FLUSH ────────────────────────────────────────────────────
 // BUMP THIS NUMBER to force EVERY open session to log in again.
@@ -103,16 +104,30 @@ export function roleCan(role: Role | null, section: Section, area: Area): boolea
 }
 
 
-export function startSession(role: Role): void {
+export function startSession(role: Role, uploadToken?: string | null): void {
   sessionStorage.setItem(KEY_AUTH, "1");
   sessionStorage.setItem(KEY_ROLE, role);
   sessionStorage.setItem(KEY_VER, SESSION_VERSION);   // stamp, so a later bump kills it
+  // Unlike the flags above, this one the SERVER can verify (see lib/upload-token.ts) —
+  // it's what lets the image routes tell a real login from anyone poking the endpoint.
+  if (uploadToken) sessionStorage.setItem(KEY_UPTOK, uploadToken);
+  else sessionStorage.removeItem(KEY_UPTOK);
 }
 
 export function endSession(): void {
   sessionStorage.removeItem(KEY_AUTH);
   sessionStorage.removeItem(KEY_ROLE);
   sessionStorage.removeItem(KEY_VER);
+  sessionStorage.removeItem(KEY_UPTOK);
+}
+
+// The signed token for the image upload/delete routes. Null when not logged in, when
+// the session predates this feature, or when the server has no UPLOAD_TOKEN_SECRET set
+// — in every case uploading is refused with a message, and nothing else is affected.
+export function readUploadToken(): string | null {
+  if (typeof window === "undefined") return null;
+  if (readRole() === null) return null;
+  return sessionStorage.getItem(KEY_UPTOK);
 }
 
 // Gate for a protected page. Returns `authed` — render nothing until it's true.

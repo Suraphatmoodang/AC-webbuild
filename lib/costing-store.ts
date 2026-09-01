@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { getAccessories, getLotMap } from "./store";
 import { getFabrics, getFabricLotMap } from "./fabric-store";
+import type { StoredImage } from "./images";
 
 // ── Product costing (ต้นทุนสินค้า) ─────────────────────────────────────
 // A THIRD, standalone section next to อุปกรณ์ / ผ้า. Unlike those two it is NOT a
@@ -260,6 +261,11 @@ export type ProductCosting = {
   offer_price: number;   // offered/budget price PER GARMENT (same basis as sellingPrice; × order_qty for the
                          // order-level budget) — stored for budget-vs-actual; NOT in the cost math
   actual_entries: ActualEntry[];   // Phase D: hand-logged actual costs (JSONB)
+  // Photos of the order (ตัวอย่าง / แบบ / งานเสร็จ) — R2 keys only (JSONB); the bytes
+  // live in Cloudflare R2. See lib/images.ts. Optional until the migration runs, and
+  // saved through setCostingImages rather than the order form, so a form save can't
+  // clobber a photo someone just added.
+  images?: StoredImage[] | null;
   note: string;
   created_by: string;
   created_at: string;
@@ -406,6 +412,18 @@ export async function updateCosting(id: string, input: Partial<CostingInput>): P
     .single();
   if (error) throw error;
   return data as ProductCosting;
+}
+
+// Save the order's JSONB list of R2 image keys. Kept separate from updateCosting so a
+// photo added mid-edit is persisted on its own and never overwritten by a form save.
+// Requires: alter table product_costings add column if not exists images jsonb not null default '[]';
+export async function setCostingImages(id: string, images: StoredImage[]): Promise<void> {
+  const { error } = await supabase.from("product_costings").update({ images }).eq("id", id);
+  if (error) {
+    throw new Error(/images/i.test(error.message)
+      ? "ยังไม่ได้เพิ่มคอลัมน์ images ในฐานข้อมูล — ติดต่อผู้ดูแลระบบ"
+      : error.message);
+  }
 }
 
 export async function deleteCosting(id: string): Promise<void> {

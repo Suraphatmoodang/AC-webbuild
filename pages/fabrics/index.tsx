@@ -10,6 +10,8 @@ import { compareFabric } from "@/lib/sort";
 import { STOCK_UNITS, WEIGHT_UNITS } from "@/lib/fabric-units";
 import { OwnerTag } from "@/lib/owner-tag";
 import { LockChip, reservedOf, reserveNoteOf } from "@/lib/reserve";
+import { ImageGallery, ImageThumb } from "@/lib/image-gallery";
+import { normalizeImages } from "@/lib/images";
 import { OwnerSelect } from "@/lib/owner-select";
 import { exportFabricsXlsx } from "@/lib/stock-export";
 
@@ -219,7 +221,13 @@ export default function FabricStockPage() {
                     <tr key={item.id} style={{ cursor: "pointer" }} onClick={() => setViewItem(item)}>
                       <td><span className="tag">{item.fabric_type}</span></td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--text2)" }}>{item.fabric_code || "—"}</td>
-                      <td style={{ color: "var(--text2)" }}>{item.construction || "—"}</td>
+                      <td style={{ color: "var(--text2)" }}>
+                        {/* First photo as a row thumbnail; nothing rendered when there is none */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <ImageThumb images={normalizeImages(item.images)} />
+                          <span>{item.construction || "—"}</span>
+                        </div>
+                      </td>
                       <td style={{ color: "var(--text2)" }}>{item.color || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>{item.width || "—"}</td>
                       <td className="num" style={{ color: "var(--text3)" }}>
@@ -307,8 +315,16 @@ export default function FabricStockPage() {
                   ["เทอมจ่ายเงิน", sup.payment_term],
                   ["เลขผู้เสียภาษี", sup.tax_id],
                 ] : [];
+                const vImages = normalizeImages(viewItem.images);
                 return (
                   <>
+                    {/* Photos, view-only: /fabrics is a public page — editing lives in manage. */}
+                    {vImages.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <ImageGallery images={vImages} scope="fabric" id={viewItem.id} readOnly
+                          onPersist={async () => {}} />
+                      </div>
+                    )}
                     {rows.map(([label, val]) => (
                       <div key={label} style={{ display: "flex", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
                         <span style={{ width: 170, color: "var(--text3)", fontSize: 15, flexShrink: 0 }}>{label}</span>

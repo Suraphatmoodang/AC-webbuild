@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import type { Role } from "@/lib/auth";
+import { mintUploadToken } from "@/lib/upload-token";
 
 // Accounts live in env vars — one pair per role. Set these in .env.local locally
 // and in the Vercel project settings for the deployed site:
@@ -47,7 +48,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     if (!user || !pass) continue;
 
     if (cleanUsername === user && cleanPassword === pass) {
-      return res.status(200).json({ ok: true, role: acct.role });
+      // Signed token for the API routes that need a check the server can actually make
+      // (image upload/delete — see lib/upload-token.ts). Null when UPLOAD_TOKEN_SECRET
+      // is unset: login still works exactly as before, only uploading is refused.
+      return res.status(200).json({ ok: true, role: acct.role, uploadToken: mintUploadToken(acct.role) });
     }
   }
 

@@ -13,6 +13,7 @@ import { supabase } from "./supabase";
 // gets fabric suppliers.
 export type { Supplier } from "./store";
 import type { Supplier } from "./store";
+import type { StoredImage } from "./images";
 
 // Shown in the เจ้าของ (owner) column for stock WE own — i.e. when `owner` is blank.
 // External/consignment rows show their own factory name instead. One place to change
@@ -40,6 +41,9 @@ export type Fabric = {
   // unlocked. See lib/reserve.tsx. Optional on the type until the migration runs.
   reserved_qty?: number | null;
   reserved_note?: string | null;   // who/what it's kept for (order code / customer)
+  // Photos of the fabric — R2 keys only (JSONB); the bytes live in Cloudflare R2.
+  // See lib/images.ts. Optional until the migration runs.
+  images?: StoredImage[] | null;
   owner: string;                // เจ้าของ — factory that owns consignment stock; blank = ours (a label, not identity)
   supplier_id: string | null;   // FK → fabric_suppliers.id (NOT the accessory suppliers table)
   valuation_method: "fifo" | "lifo";
@@ -254,6 +258,18 @@ export async function bulkDeactivateFabrics(ids: string[]): Promise<void> {
     const slice = ids.slice(i, i + CHUNK);
     const { error } = await supabase.from("fabrics").update({ is_active: false }).in("id", slice);
     if (error) throw error;
+  }
+}
+
+// ── Entry images ───────────────────────────────────────────────
+// Mirror of the accessory store's helper — saves the JSONB list of R2 keys.
+// Requires: alter table fabrics add column if not exists images jsonb not null default '[]';
+export async function setFabricImages(id: string, images: StoredImage[]): Promise<void> {
+  const { error } = await supabase.from("fabrics").update({ images }).eq("id", id);
+  if (error) {
+    throw new Error(/images/i.test(error.message)
+      ? "ยังไม่ได้เพิ่มคอลัมน์ images ในฐานข้อมูล — ติดต่อผู้ดูแลระบบ"
+      : error.message);
   }
 }
 

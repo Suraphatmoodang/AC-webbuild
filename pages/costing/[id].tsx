@@ -21,8 +21,11 @@ import {
   type SizeRow,
   type CostingInput,
   type PriceOption,
+  setCostingImages,
   type ItemFlow,
 } from "@/lib/costing-store";
+import { ImageGallery } from "@/lib/image-gallery";
+import { normalizeImages, type StoredImage } from "@/lib/images";
 import { getProducts, addProduct, productLabel, type Product, type ProductInput } from "@/lib/product-store";
 import { PRODUCT_OPT as OPT, buildComboOptions } from "@/lib/product-spec";
 import { Combo } from "@/lib/combo";
@@ -257,6 +260,10 @@ export default function CostingEditor() {
   const [products, setProducts] = useState<Product[]>([]);
   const [savingProduct, setSavingProduct] = useState(false);
   const [newSize, setNewSize] = useState("");
+  // Order photos (ตัวอย่าง / แบบ / งานเสร็จ). Kept OUT of `form` on purpose: they save
+  // through their own call the moment they're uploaded, so a form save can't clobber
+  // them and a cancelled edit can't leave paid-for files in R2 that nothing references.
+  const [images, setImages] = useState<StoredImage[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   const notify = (msg: string, type: "success" | "error" = "success") => {
@@ -291,6 +298,7 @@ export default function CostingEditor() {
           const c = await getCosting(id);
           if (alive && c) {
             setForm(fromCosting(c));
+            setImages(normalizeImages(c.images));
             // Load the order's tagged material flows (received/used) + actual material spend — non-fatal.
             getOrderFlows(c.id, c.code).then((f) => { if (alive) setFlows(f); }).catch(() => {});
             getOrderActualMaterial(c.id, c.code).then((m) => { if (alive) setActualMaterial(m); }).catch(() => {});
@@ -576,6 +584,17 @@ export default function CostingEditor() {
                 <input value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="เว้นว่างได้" />
               </Field>
             </div>
+          </SectionCard>
+
+          {/* Photos live under the order's id in R2, so they need a saved order first. */}
+          <SectionCard title="รูปภาพ (ตัวอย่าง / แบบ / งานเสร็จ)">
+            {isNew ? (
+              <div style={{ fontSize: 13, color: "var(--text3)" }}>บันทึกออเดอร์ก่อน แล้วจึงใส่รูปได้</div>
+            ) : (
+              <ImageGallery images={images} scope="order" id={id} max={12}
+                onPersist={async (next) => { await setCostingImages(id, next); setImages(next); }}
+                onError={(m) => notify(m, "error")} />
+            )}
           </SectionCard>
 
           <SectionCard title="คุณสมบัติสินค้า">

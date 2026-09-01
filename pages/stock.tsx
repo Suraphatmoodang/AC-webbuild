@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import { getAccessories, getSuppliers, stageAccessory, getLotMap, stockFromLots, valueFromLots, type Accessory, type Supplier, type ImportRow, type Lot } from "@/lib/store";
 import { LockChip, reservedOf, reserveNoteOf } from "@/lib/reserve";
+import { ImageGallery, ImageThumb } from "@/lib/image-gallery";
+import { normalizeImages } from "@/lib/images";
 import { useSession, roleCan } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
@@ -181,7 +183,13 @@ export default function StockPage() {
                       <td><span className="tag">{item.type}</span></td>
                       <td style={{ color: "var(--text2)" }}>{item.customer || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--text2)" }}>{item.acc_code || "—"}</td>
-                      <td>{item.description || "—"}</td>
+                      <td>
+                        {/* First photo as a row thumbnail; nothing rendered when there is none */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <ImageThumb images={normalizeImages(item.images)} />
+                          <span>{item.description || "—"}</span>
+                        </div>
+                      </td>
                       <td style={{ color: "var(--text2)" }}>{item.color || "—"}</td>
                       <td style={{ color: "var(--text2)" }}>{item.size || "—"}</td>
                       <td style={{ fontFamily: "var(--mono)", color: "var(--text3)" }}>{item.row ?? "—"}</td>
@@ -263,8 +271,17 @@ export default function StockPage() {
                   ["เทอมจ่ายเงิน", sup.payment_term],
                   ["เลขผู้เสียภาษี", sup.tax_id],
                 ] : [];
+                const vImages = normalizeImages(viewItem.images);
                 return (
                   <>
+                    {/* Photos, view-only: /stock is a public page, so no editing here —
+                        adding and removing images lives in manage. */}
+                    {vImages.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <ImageGallery images={vImages} scope="acc" id={viewItem.id} readOnly
+                          onPersist={async () => {}} />
+                      </div>
+                    )}
                     {rows.map(([label, val]) => (
                       <div key={label} style={{ display: "flex", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
                         <span style={{ width: 150, color: "var(--text3)", fontSize: 15, flexShrink: 0 }}>{label}</span>

@@ -7,6 +7,9 @@ import { getFabrics, addFabric, updateFabric, deleteFabric, getSuppliers, bulkDe
   setReservation, clearReservation,
   type Fabric, type Supplier, type FabricLot } from "@/lib/fabric-store";
 import { LockChip, LockButton, ReserveModal, reservedOf, reserveNoteOf } from "@/lib/reserve";
+import { setFabricImages } from "@/lib/fabric-store";
+import { ImageGallery, ImageThumb } from "@/lib/image-gallery";
+import { normalizeImages, type StoredImage } from "@/lib/images";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { compareFabric } from "@/lib/sort";
@@ -292,6 +295,15 @@ export default function FabricManagePage() {
     } finally { setSaving(false); }
   };
 
+  // Images, like the lock, save on their own rather than with the form — the file is
+  // already in R2 by then, so waiting for บันทึก would risk paying for orphaned uploads.
+  const editingImages = normalizeImages(items.find((i) => i.id === editId)?.images);
+  const persistImages = async (next: StoredImage[]) => {
+    if (!editId) return;
+    await setFabricImages(editId, next);
+    await refresh();
+  };
+
   // Stock lock — kept OUT of the edit form on purpose: it's an operational flag, not
   // master data, so it saves on its own (and a form save can never clobber it).
   const saveLock = async (qty: number, note: string) => {
@@ -453,7 +465,13 @@ export default function FabricManagePage() {
                     <td><span className="tag">{item.fabric_type}</span></td>
                     <td style={{ fontFamily:"var(--mono)", fontSize:15, color:"var(--text2)" }}>{item.fabric_code || <span style={{color:"var(--red)",fontSize:14}}>ไม่มีเลขที่</span>}</td>
                     <td style={{ color:"var(--text2)" }}>{item.composition || "—"}</td>
-                    <td style={{ color:"var(--text2)" }}>{item.construction || "—"}</td>
+                    <td style={{ color:"var(--text2)" }}>
+                      {/* First photo as a row thumbnail; renders nothing when there is none */}
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <ImageThumb images={normalizeImages(item.images)} onClick={() => openEdit(item)} />
+                        <span>{item.construction || "—"}</span>
+                      </div>
+                    </td>
                     <td style={{ color:"var(--text2)" }}>{item.color || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text2)" }}>{item.width || "—"}</td>
                     <td style={{ fontFamily:"var(--mono)", color:"var(--text3)" }}>{item.row_label || "—"}</td>
@@ -592,6 +610,18 @@ export default function FabricManagePage() {
                     onChange={(e) => f("min_quantity", numInput(e.target.value))}
                     placeholder={String(DEFAULT_MIN_QTY)} />
                 </div>
+              </div>
+
+              {/* Photos — only once the row exists, since an image is stored under the
+                  fabric's id. On ADD, the hint below says to save first. */}
+              <div className="form-row">
+                <label className="form-label">รูปภาพ · Photos</label>
+                {editId ? (
+                  <ImageGallery images={editingImages} scope="fabric" id={editId}
+                    onPersist={persistImages} onError={(m) => showToast(m, "error")} />
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--text3)" }}>เพิ่มรายการก่อน แล้วกด “แก้ไข” เพื่อใส่รูป</div>
+                )}
               </div>
 
               {!editId ? (

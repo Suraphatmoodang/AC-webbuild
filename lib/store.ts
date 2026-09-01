@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import type { StoredImage } from "./images";
 
 export type Accessory = {
   id: string;
@@ -18,6 +19,9 @@ export type Accessory = {
   // Optional on the type until the migration runs (see the ALTERs in that file's notes).
   reserved_qty?: number | null;
   reserved_note?: string | null;   // who/what it's kept for (order code / customer)
+  // Photos of the item. Only the R2 keys live here (JSONB) — the bytes are in
+  // Cloudflare R2, so the DB stays light. See lib/images.ts. Optional until migrated.
+  images?: StoredImage[] | null;
   supplier_id: string | null;   // FK → suppliers.id
   valuation_method: "fifo" | "lifo";
   is_active: boolean;
@@ -244,6 +248,19 @@ export async function clearReservation(accessory_id: string): Promise<{ ok: true
     .eq("id", accessory_id);
   if (error) return { error: /reserved_/i.test(error.message) ? MISSING_LOCK_COLUMN : error.message };
   return { ok: true };
+}
+
+// ── Entry images ───────────────────────────────────────────────
+// Saves the JSONB list of R2 keys for one item. The upload itself already happened
+// (browser → R2, see lib/images.ts); this is only the pointer.
+// Requires: alter table accessories add column if not exists images jsonb not null default '[]';
+export async function setAccessoryImages(id: string, images: StoredImage[]): Promise<void> {
+  const { error } = await supabase.from("accessories").update({ images }).eq("id", id);
+  if (error) {
+    throw new Error(/images/i.test(error.message)
+      ? "ยังไม่ได้เพิ่มคอลัมน์ images ในฐานข้อมูล — ติดต่อผู้ดูแลระบบ"
+      : error.message);
+  }
 }
 
 // ── Transactions ──────────────────────────────────────────────

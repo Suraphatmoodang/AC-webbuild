@@ -24,9 +24,11 @@ export default function LoginPage() {
       if (res.ok) {
         // The server decides the role from which account matched; a section admin
         // lands in their own section, the super admin gets the picker.
-        const { role } = (await res.json()) as { role?: Role };
+        const { role, uploadToken } = (await res.json()) as { role?: Role; uploadToken?: string | null };
         const r: Role = role ?? "super";
-        startSession(r);
+        // uploadToken is the server-verifiable half of the session — only the image
+        // upload/delete routes look at it (see lib/upload-token.ts).
+        startSession(r, uploadToken ?? null);
         router.push(HOME_FOR[r]);
       } else {
         const data = await res.json();
