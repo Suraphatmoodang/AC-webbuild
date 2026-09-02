@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { uploadImage, deleteImageObject, imageUrl, thumbUrl, imagesConfigured, IMAGE_ACCEPT,
   type StoredImage, type ImageScope } from "./images";
 
@@ -25,6 +25,16 @@ export function ImageGallery({ images, scope, id, onPersist, onError, readOnly, 
   max?: number;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  // Whether to offer a separate "ถ่ายรูป" button. The `capture` attribute REPLACES the
+  // gallery with the camera rather than adding to it, so offering both means two inputs
+  // — and the camera one is only worth showing on a device that has one pointed at the
+  // goods. Coarse pointer = touch screen; checked in an effect, never during render, so
+  // the server-rendered markup and the first client render still agree (no hydration mismatch).
+  const [canCapture, setCanCapture] = useState(false);
+  useEffect(() => {
+    setCanCapture(typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewing, setViewing] = useState<StoredImage | null>(null);
@@ -62,7 +72,9 @@ export function ImageGallery({ images, scope, id, onPersist, onError, readOnly, 
       }
     }
     setBusy(false);
-    if (fileRef.current) fileRef.current.value = "";   // so the same file can be re-picked
+    // Clear BOTH inputs, or picking/shooting the identical file again fires no change event.
+    if (fileRef.current) fileRef.current.value = "";
+    if (cameraRef.current) cameraRef.current.value = "";
   };
 
   const remove = async (img: StoredImage) => {
@@ -128,12 +140,25 @@ export function ImageGallery({ images, scope, id, onPersist, onError, readOnly, 
         ))}
 
         {!readOnly && images.length < max && (
-          <button type="button" onClick={(e) => { e.preventDefault(); fileRef.current?.click(); }} disabled={busy}
-            style={{ width: 84, height: 84, borderStyle: "dashed", color: "var(--text3)", fontSize: 12,
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, cursor: "pointer" }}>
-            <span style={{ fontSize: 20, lineHeight: 1 }}>＋</span>
-            {busy && progress ? `${progress.done + 1}/${progress.total}` : busy ? "กำลังอัปโหลด…" : "เพิ่มรูป"}
-          </button>
+          <>
+            {/* On a phone, ถ่ายรูป goes straight to the rear camera — the common case when
+                someone is standing at the shelf — and เลือกรูป opens the gallery/files. */}
+            {canCapture && (
+              <button type="button" onClick={(e) => { e.preventDefault(); cameraRef.current?.click(); }} disabled={busy}
+                style={{ width: 84, height: 84, borderStyle: "dashed", color: "var(--accent)", borderColor: "var(--accent)",
+                  fontSize: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  gap: 2, cursor: "pointer" }}>
+                <span style={{ fontSize: 22, lineHeight: 1 }}>📷</span>
+                ถ่ายรูป
+              </button>
+            )}
+            <button type="button" onClick={(e) => { e.preventDefault(); fileRef.current?.click(); }} disabled={busy}
+              style={{ width: 84, height: 84, borderStyle: "dashed", color: "var(--text3)", fontSize: 12,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, cursor: "pointer" }}>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>＋</span>
+              {busy && progress ? `${progress.done + 1}/${progress.total}` : busy ? "กำลังอัปโหลด…" : canCapture ? "เลือกรูป" : "เพิ่มรูป"}
+            </button>
+          </>
         )}
       </div>
 
@@ -142,6 +167,16 @@ export function ImageGallery({ images, scope, id, onPersist, onError, readOnly, 
       )}
 
       <input ref={fileRef} type="file" accept={IMAGE_ACCEPT} multiple hidden
+        onChange={(e) => pick(e.target.files)} />
+
+      {/* Camera input. Three deliberate differences from the picker above:
+          · capture="environment" → the REAR camera (the goods, not a selfie)
+          · no `multiple` — a capture returns exactly one shot, and some Android builds
+            get confused by the combination
+          · accept="image/*" rather than the explicit type list, which a few Android
+            camera apps mishandle. Safe: the browser re-encodes to JPEG before upload,
+            and the server re-checks the type on the presign anyway. */}
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden
         onChange={(e) => pick(e.target.files)} />
 
       {/* Full-size viewer */}

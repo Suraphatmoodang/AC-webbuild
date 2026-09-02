@@ -75,7 +75,19 @@ async function putObject(body: Blob, contentType: string, scope: ImageScope, id:
   if (!signRes.ok) throw new Error(signed.error ?? "ขอลิงก์อัปโหลดไม่สำเร็จ");
 
   // Straight to R2. Content-Type must match what was signed or R2 rejects it.
-  const put = await fetch(signed.uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body });
+  let put: Response;
+  try {
+    put = await fetch(signed.uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body });
+  } catch {
+    // fetch() rejects (rather than returning a status) when the browser blocks the request
+    // outright — in practice always the R2 bucket's CORS rule not listing THIS origin, so
+    // the preflight 403s and the upload is never sent. Naming the origin turns an opaque
+    // "Failed to fetch" into the one fact needed to fix it.
+    throw new Error(
+      `อัปโหลดไปที่ R2 ไม่ได้ — เบราว์เซอร์ถูกบล็อก (CORS) สำหรับ ${typeof location !== "undefined" ? location.origin : "หน้านี้"} ` +
+      `· ให้เพิ่ม origin นี้ในการตั้งค่า CORS ของบัคเก็ต R2 แล้วลองใหม่`
+    );
+  }
   if (!put.ok) throw new Error(`อัปโหลดไม่สำเร็จ (${put.status})`);
   return signed.key as string;
 }
