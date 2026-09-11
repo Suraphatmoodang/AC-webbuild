@@ -17,6 +17,13 @@ import {
   type ExtraKind,
   ORDER_STATUSES,
   ACTUAL_CATEGORIES,
+  ACTUAL_MODES,
+  actualGroupMeta,
+  cloneActualLines,
+  normalizeActualCosting,
+  showsActualCosting,
+  type ActualGroup,
+  type ActualMode,
   DEFAULT_SIZE_LABELS,
   type SizeRow,
   type CostingInput,
@@ -67,6 +74,9 @@ type FabricLineF = {
 };
 type ActualEntryF = { date: string; category: string; label: string; amount: string; note: string };
 const emptyActual = (): ActualEntryF => ({ date: new Date().toISOString().split("T")[0], category: "material", label: "", amount: "", note: "" });
+// Close-out actual line. `est` stays a NUMBER — it's the snapshot taken at clone time, never
+// typed, so it has no reason to be a blank-able string like qty/price.
+type ActualLineF = { ref: string; group: ActualGroup; label: string; unit: string; qty: string; price: string; est: number; note: string };
 type ExtraLineF = {
   label: string; desc: string; accessory_id: string | null;
   mode: "flat" | "qty"; amount: string; qty_per_pc: string; unit: string; unit_price: string;
@@ -96,6 +106,11 @@ type FormState = {
   waste_pct: string; overhead_baht: string; overhead_pc: string; profit_pct: string; cutting_loss_pct: string;
   offer_price: string;   // offered/budget price PER GARMENT (stored; not in the math)
   actual_entries: ActualEntryF[];
+  // Close-out actuals. Only ONE of the two is ever in play (actual_mode decides), but both
+  // are kept so switching modes doesn't throw away what was already keyed in the other.
+  actual_mode: ActualMode;
+  actual_total: string;        // แบบรวม — the ORDER total (per-piece is derived from จำนวนสั่ง)
+  actual_lines: ActualLineF[]; // แบบแยกรายการ — the cloned + hand-added cost lines
   note: string;
 };
 
@@ -116,6 +131,7 @@ const emptyForm = (): FormState => ({
   waste_pct: "3", overhead_baht: "8000", overhead_pc: "", profit_pct: "10", cutting_loss_pct: "5",
   offer_price: "",
   actual_entries: [],
+  actual_mode: "static", actual_total: "", actual_lines: [],
   note: "",
 });
 
@@ -169,6 +185,16 @@ function fromCosting(c: any): FormState {
     actual_entries: (c.actual_entries ?? []).map((e: any) => ({
       date: e.date ?? "", category: e.category ?? "other", label: e.label ?? "", amount: s(e.amount), note: e.note ?? "",
     })),
+    ...(() => {
+      // normalizeActualCosting absorbs a missing column / null / junk, so this reads the same
+      // before and after the migration. A stored 0 total shows as blank, not "0".
+      const ac = normalizeActualCosting(c.actual_costing);
+      return {
+        actual_mode: ac.mode,
+        actual_total: ac.total ? String(ac.total) : "",
+        actual_lines: ac.lines.map((l): ActualLineF => ({ ...l, qty: s(l.qty), price: s(l.price) })),
+      };
+    })(),
     note: c.note ?? "",
   };
 }
@@ -209,6 +235,14 @@ function toInput(f: FormState, role: Role | null): CostingInput {
       category: (["material", "labor", "overhead", "other"].includes(e.category) ? e.category : "other") as any,
       label: e.label.trim(), amount: n(e.amount), note: e.note.trim(),
     })),
+    actual_costing: {
+      mode: f.actual_mode,
+      total: n(f.actual_total),
+      lines: f.actual_lines.map((l) => ({
+        ref: l.ref, group: l.group, label: l.label.trim(), unit: l.unit.trim(),
+        qty: n(l.qty), price: n(l.price), est: l.est, note: l.note.trim(),
+      })),
+    },
     note: f.note.trim(), created_by: role ?? "",
   };
 }
@@ -257,6 +291,10 @@ export default function CostingEditor() {
   const [flows, setFlows] = useState<{ acc: Map<string, ItemFlow>; fab: Map<string, ItemFlow> }>({ acc: new Map(), fab: new Map() });
   // Phase D — actual material spend derived from tagged OUT transactions × lot unit_cost.
   const [actualMaterial, setActualMaterial] = useState(0);
+  // แบบรวม is typed as EITHER a per-piece figure or an order total; only the total is stored
+  // (form.actual_total), so this holds just the per-piece box's own text while it's being
+  // typed — otherwise "12." would round-trip through the total and lose its decimal point.
+  const [actualPerPc, setActualPerPc] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [savingProduct, setSavingProduct] = useState(false);
   const [newSize, setNewSize] = useState("");
@@ -299,6 +337,10 @@ export default function CostingEditor() {
           if (alive && c) {
             setForm(fromCosting(c));
             setImages(normalizeImages(c.images));
+            // Seed the per-piece box from the stored order total (the box is a view onto it).
+            const ac = normalizeActualCosting(c.actual_costing);
+            const q = Number(c.order_qty) || 0;
+            setActualPerPc(ac.total > 0 && q > 0 ? String(round2(ac.total / q)) : "");
             // Load the order's tagged material flows (received/used) + actual material spend — non-fatal.
             getOrderFlows(c.id, c.code).then((f) => { if (alive) setFlows(f); }).catch(() => {});
             getOrderActualMaterial(c.id, c.code).then((m) => { if (alive) setActualMaterial(m); }).catch(() => {});
@@ -435,6 +477,40 @@ export default function CostingEditor() {
   const updActual = (i: number, patch: Partial<ActualEntryF>) =>
     set("actual_entries", form.actual_entries.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
+  // ── Close-out actuals: แบบรวม (one number) ──
+  // The order TOTAL is canonical; the per-piece box writes through it (× จำนวนสั่ง) and the
+  // total box writes back into the box. Either can be typed — they can't disagree.
+  const setActualTotal = (v: string) => {
+    set("actual_total", v);
+    setActualPerPc(orderQty > 0 && n(v) > 0 ? String(round2(n(v) / orderQty)) : "");
+  };
+  const setActualFromPerPc = (v: string) => {
+    setActualPerPc(v);
+    set("actual_total", n(v) > 0 && orderQty > 0 ? String(round2(n(v) * orderQty)) : "");
+  };
+
+  // ── Close-out actuals: แบบแยกรายการ (cloned lines) ──
+  const actualLineF = (l: ReturnType<typeof cloneActualLines>[number]): ActualLineF => ({ ...l, qty: s(l.qty), price: s(l.price) });
+  const cloneActuals = () => setForm((f) => ({ ...f, actual_lines: cloneActualLines(toInput(f, role)).map(actualLineF) }));
+  // Re-cloning overwrites everything keyed so far, so it asks first — unless there's nothing
+  // to lose (the first clone, which happens on its own when the mode is first chosen).
+  const recloneActuals = () => {
+    if (form.actual_lines.length > 0 && !confirm("ดึงรายการจากประมาณการใหม่ — จำนวน/ราคาจริงที่กรอกไว้จะถูกเขียนทับทั้งหมด ดำเนินการต่อ?")) return;
+    cloneActuals();
+  };
+  const setActualMode = (m: ActualMode) => {
+    // First switch into แบบแยกรายการ seeds itself from the estimate — that IS the clone.
+    if (m === "lines" && form.actual_lines.length === 0) {
+      setForm((f) => ({ ...f, actual_mode: m, actual_lines: cloneActualLines(toInput(f, role)).map(actualLineF) }));
+      return;
+    }
+    set("actual_mode", m);
+  };
+  const addActualLine = () => set("actual_lines", [...form.actual_lines,
+    { ref: `x:${Date.now()}`, group: "other" as ActualGroup, label: "", unit: "", qty: "1", price: "", est: 0, note: "" }]);
+  const updActualLine = (i: number, patch: Partial<ActualLineF>) =>
+    set("actual_lines", form.actual_lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
   // ── Size breakdown ──
   const addSizeRow = () => set("size_breakdown", [...form.size_breakdown, emptySizeRow()]);
   const updSizeColor = (i: number, color: string) =>
@@ -534,6 +610,17 @@ export default function CostingEditor() {
   const cmpEstTotal = cmpRows.reduce((s, r) => s + r.est, 0);
   const cmpActTotal = cmpRows.reduce((s, r) => s + r.act, 0);
 
+  // ── Close-out actual cost (two modes) ──
+  // Shown from กำลังผลิต onwards — before that there is nothing real to key, only a projection.
+  // Both modes resolve to ONE order-level figure, so the comparison against ราคาเสนอ is identical
+  // either way and switching mode never changes what the margin means.
+  const showActuals = !isNew && showsActualCosting(form.status);
+  const actualLinesSum = form.actual_lines.reduce((t, l) => t + n(l.qty) * n(l.price), 0);
+  const actualLinesEst = form.actual_lines.reduce((t, l) => t + l.est, 0);
+  const actualOrderTotal = form.actual_mode === "lines" ? actualLinesSum : n(form.actual_total);
+  const actualPerPiece = orderQty > 0 ? actualOrderTotal / orderQty : 0;
+  const offerTotal = n(form.offer_price) * orderQty;
+
   return (
     <div className="costing-page" style={{ maxWidth: 1400, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
@@ -584,17 +671,6 @@ export default function CostingEditor() {
                 <input value={form.tags} onChange={(e) => set("tags", e.target.value)} placeholder="เว้นว่างได้" />
               </Field>
             </div>
-          </SectionCard>
-
-          {/* Photos live under the order's id in R2, so they need a saved order first. */}
-          <SectionCard title="รูปภาพ (ตัวอย่าง / แบบ / งานเสร็จ)">
-            {isNew ? (
-              <div style={{ fontSize: 13, color: "var(--text3)" }}>บันทึกออเดอร์ก่อน แล้วจึงใส่รูปได้</div>
-            ) : (
-              <ImageGallery images={images} scope="order" id={id} max={12}
-                onPersist={async (next) => { await setCostingImages(id, next); setImages(next); }}
-                onError={(m) => notify(m, "error")} />
-            )}
           </SectionCard>
 
           <SectionCard title="คุณสมบัติสินค้า">
@@ -967,6 +1043,108 @@ export default function CostingEditor() {
             </div>
           </SectionCard>
 
+          {/* ── Live cost summary — the itemized "costing sheet", full-width, sitting directly
+              under the cost inputs like the Sub-Total / Price block of the paper sheet.
+              Left = per-piece breakdown table; right = whole-order totals. Stacks on mobile. ── */}
+          <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 500, color: "var(--text2)", marginBottom: 16 }}>สรุปต้นทุน (สด)</h2>
+            <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "flex-start", justifyContent: "center" }}>
+              {/* Itemized sheet — two value columns: per garment and order total (× จำนวนสั่ง). */}
+              <div style={{ flex: "1 1 420px", maxWidth: 560 }}>
+                <table style={{ fontSize: 14, width: "100%" }}>
+                  <thead>
+                    <tr style={{ color: "var(--text3)", fontSize: 12 }}>
+                      <th style={{ border: "none", padding: "0 0 6px", textAlign: "left", fontWeight: 400 }}>รายการ</th>
+                      <th style={{ border: "none", padding: "0 0 6px", textAlign: "right", fontWeight: 400 }}>/ ตัว</th>
+                      <th style={{ border: "none", padding: "0 0 6px", textAlign: "right", fontWeight: 400 }}>
+                        รวมทั้งออเดอร์{orderQty > 0 ? ` (× ${orderQty.toLocaleString()})` : ""}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {breakdownRows.map(([label, val]) => (
+                      <tr key={label}>
+                        <td style={{ border: "none", padding: "6px 0", color: "var(--text2)" }}>{label}</td>
+                        <td className="num" style={{ border: "none", padding: "6px 0", textAlign: "right" }}>{fmt(val)}</td>
+                        <td className="num" style={{ border: "none", padding: "6px 0", textAlign: "right", color: "var(--text2)" }}>{orderQty > 0 ? fmt(val * orderQty) : "—"}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600 }}>ต้นทุนรวม</td>
+                      <td className="num" style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600, fontSize: 15, textAlign: "right" }}>{fmt(bd.totalCost)}</td>
+                      <td className="num" style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600, fontSize: 15, textAlign: "right" }}>{orderQty > 0 ? fmt(bd.totalCost * orderQty) : "—"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ border: "none", padding: "6px 0", color: "var(--green)" }}>กำไร ({form.profit_pct || 0}%)</td>
+                      <td className="num" style={{ border: "none", padding: "6px 0", color: "var(--green)", textAlign: "right" }}>{fmt(bd.profit)}</td>
+                      <td className="num" style={{ border: "none", padding: "6px 0", color: "var(--green)", textAlign: "right" }}>{orderQty > 0 ? fmt(bd.profit * orderQty) : "—"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)" }}>ราคาขาย</td>
+                      <td className="num" style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)", fontSize: 17, textAlign: "right" }}>{fmt(bd.sellingPrice)}</td>
+                      <td className="num" style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)", fontSize: 17, textAlign: "right" }}>{orderQty > 0 ? fmt(bd.sellingPrice * orderQty) : "—"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Whole-order totals. Shows when there's an order qty OR an offered price entered.
+                  The offered price is DISPLAY-ONLY — it never feeds computeCosting or any total above. */}
+              {(orderQty > 0 || n(form.offer_price) > 0) && (() => {
+                const offer = n(form.offer_price);
+                return (
+                  <div style={{ flex: "1 1 240px", maxWidth: 340, background: "var(--bg3)", borderRadius: "var(--r)", padding: "16px 18px", fontSize: 14 }}>
+                    {orderQty > 0 && (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                          <span style={{ color: "var(--text3)" }}>จำนวนสั่ง</span>
+                          <span style={{ fontFamily: "var(--mono)" }}>{orderQty.toLocaleString()} ตัว</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                          <span style={{ color: "var(--text3)" }}>ต้นทุนทั้งออเดอร์</span>
+                          <span style={{ fontFamily: "var(--mono)" }}>฿{fmt(bd.totalCost * orderQty)}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                          <span style={{ color: "var(--text3)" }}>มูลค่าขายทั้งออเดอร์</span>
+                          <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 600 }}>฿{fmt(bd.sellingPrice * orderQty)}</span>
+                        </div>
+                      </>
+                    )}
+                    {offer > 0 && (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", paddingTop: orderQty > 0 ? 10 : 0, marginTop: orderQty > 0 ? 10 : 0, borderTop: orderQty > 0 ? "1px solid var(--border)" : "none" }}>
+                          <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ต่อตัว)</span>
+                          <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offer)}</span>
+                        </div>
+                        {orderQty > 0 && (() => {
+                          // The offer is typed PER GARMENT, so the order-level budget is offer × จำนวนสั่ง.
+                          // Margin compares that against the computed order cost — both whole-order figures
+                          // (comparing the per-piece offer against the order cost was the old bug).
+                          const offerTotal = offer * orderQty;
+                          const margin = offerTotal - bd.totalCost * orderQty;
+                          return (
+                            <>
+                              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+                                <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ทั้งออเดอร์)</span>
+                                <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offerTotal)}</span>
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
+                                <span style={{ color: "var(--text3)" }}>กำไรถ้ารับราคานี้</span>
+                                <span style={{ fontFamily: "var(--mono)", color: margin >= 0 ? "var(--green)" : "var(--red)" }}>
+                                  {margin >= 0 ? "+" : ""}฿{fmt(margin)}
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
           {/* ── Per-order material ledger (existing orders only) ── */}
           {!isNew && (
             <SectionCard title="การติดตามวัสดุ (ตามออเดอร์)">
@@ -1016,6 +1194,195 @@ export default function CostingEditor() {
               )}
             </SectionCard>
           )}
+          {/* ── Close-out actual cost — two modes, from กำลังผลิต onwards ────────────
+              Mode is per order: แบบรวม for a job nobody itemises, แบบแยกรายการ when the real
+              invoices are worth keeping line by line. Both feed the same margin-vs-ราคาเสนอ
+              strip below, so the answer to "did we make money" reads the same either way. ── */}
+          {showActuals && (
+            <SectionCard title="ราคาจริงของออเดอร์">
+              <div style={{ fontSize: 14, color: "var(--text3)", marginBottom: 12, lineHeight: 1.6 }}>
+                ต้นทุน<b style={{ color: "var(--text2)" }}>ที่เกิดขึ้นจริง</b>ของออเดอร์นี้ — เทียบกับ<b style={{ color: "var(--text2)" }}>ราคาเสนอ/งบ</b>เพื่อดูกำไรจริง · เลือกได้ว่าจะบันทึกเป็นตัวเลขเดียว หรือแยกทีละรายการ
+              </div>
+
+              {/* Segmented control — one order uses one mode, but what was keyed in the other
+                  is kept, so flipping back and forth never destroys anything. */}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                {ACTUAL_MODES.map((m) => {
+                  const on = form.actual_mode === m.key;
+                  return (
+                    <button key={m.key} type="button" onClick={() => setActualMode(m.key)} title={m.hint}
+                      style={{
+                        padding: "7px 14px", fontSize: 13, fontWeight: on ? 600 : 400,
+                        borderColor: on ? "var(--accent)" : "var(--border)",
+                        color: on ? "var(--accent)" : "var(--text2)",
+                        background: on ? "var(--bg3)" : "transparent",
+                      }}>
+                      {m.th}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {form.actual_mode === "static" ? (
+                <>
+                  <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <Field label="ต้นทุนจริง / ตัว" hint={orderQty > 0 ? "กรอกช่องไหนก็ได้ — อีกช่องคำนวณให้จากจำนวนสั่ง" : "ใส่จำนวนสั่งก่อน จึงจะแปลงเป็นยอดรวมได้"}>
+                      <input className="num" inputMode="decimal" value={actualPerPc} disabled={orderQty <= 0}
+                        onChange={(e) => setActualFromPerPc(e.target.value)} placeholder="0" />
+                    </Field>
+                    <Field label="ต้นทุนจริง รวมทั้งออเดอร์ (บาท)">
+                      <input className="num" inputMode="decimal" value={form.actual_total}
+                        onChange={(e) => setActualTotal(e.target.value)} placeholder="0" />
+                    </Field>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+                    <button type="button" className="small" style={{ padding: "5px 12px" }} onClick={recloneActuals}>
+                      ↺ ดึงรายการจากประมาณการใหม่
+                    </button>
+                    <button type="button" className="small" style={{ padding: "5px 12px" }} onClick={addActualLine}>
+                      + เพิ่มค่าใช้จ่ายเพิ่มเติม
+                    </button>
+                    <span style={{ fontSize: 12, color: "var(--text3)" }}>
+                      คอลัมน์ประมาณการคือค่าที่โคลนมาตอนนั้น — แก้ประมาณการภายหลังไม่กระทบตัวเลขนี้
+                    </span>
+                  </div>
+                  {form.actual_lines.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "var(--text3)" }}>
+                      ยังไม่มีรายการ — กด “↺ ดึงรายการจากประมาณการใหม่” เพื่อโคลนต้นทุนของออเดอร์นี้มาใส่ราคาจริง
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ fontSize: 14, minWidth: 820, width: "100%" }}>
+                        <thead>
+                          <tr style={{ color: "var(--text3)", fontSize: 12 }}>
+                            <th style={{ padding: "6px 8px", textAlign: "left" }}>รายการ</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>จำนวนจริง</th>
+                            <th style={{ padding: "6px 8px", textAlign: "left" }}>หน่วย</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>ราคาจริง/หน่วย</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>รวมจริง</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>ประมาณการ</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>ส่วนต่าง</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {form.actual_lines.map((l, i) => {
+                            const total = n(l.qty) * n(l.price);
+                            const diff = total - l.est;
+                            const g = actualGroupMeta(l.group);
+                            return (
+                              <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                                <td style={{ padding: "6px 8px", minWidth: 220 }}>
+                                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                    <span style={{ fontSize: 11, whiteSpace: "nowrap", padding: "2px 8px", borderRadius: 999,
+                                      background: "var(--bg3)", color: g.color, flexShrink: 0 }}>{g.th}</span>
+                                    <input value={l.label} title={l.note || l.label}
+                                      onChange={(e) => updActualLine(i, { label: e.target.value })} placeholder="ชื่อรายการ" />
+                                  </div>
+                                </td>
+                                <td style={{ padding: "6px 8px" }}>
+                                  <input className="num" inputMode="decimal" value={l.qty} style={{ width: 90 }}
+                                    onChange={(e) => updActualLine(i, { qty: e.target.value })} placeholder="0" />
+                                </td>
+                                <td style={{ padding: "6px 8px" }}>
+                                  <input value={l.unit} style={{ width: 74 }}
+                                    onChange={(e) => updActualLine(i, { unit: e.target.value })} placeholder="หน่วย" />
+                                </td>
+                                <td style={{ padding: "6px 8px" }}>
+                                  <input className="num" inputMode="decimal" value={l.price} style={{ width: 100 }}
+                                    onChange={(e) => updActualLine(i, { price: e.target.value })} placeholder="0" />
+                                </td>
+                                <td className="num" style={{ padding: "6px 8px", textAlign: "right", fontWeight: 500 }}>{fmt(total)}</td>
+                                <td className="num" style={{ padding: "6px 8px", textAlign: "right", color: "var(--text3)" }}>{l.est > 0 ? fmt(l.est) : "—"}</td>
+                                <td className="num" style={{ padding: "6px 8px", textAlign: "right",
+                                  color: diff > 0.005 ? "var(--red)" : diff < -0.005 ? "var(--green)" : "var(--text3)" }}>
+                                  {l.est > 0 ? `${diff > 0 ? "+" : ""}${fmt(diff)}` : "—"}
+                                </td>
+                                <td style={{ padding: "6px 8px" }}>
+                                  <button className="cl-x" title="ลบรายการ"
+                                    onClick={() => set("actual_lines", form.actual_lines.filter((_, j) => j !== i))}>×</button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          <tr style={{ borderTop: "2px solid var(--border2)" }}>
+                            <td style={{ padding: "10px 8px", fontWeight: 600 }} colSpan={4}>รวมทั้งออเดอร์</td>
+                            <td className="num" style={{ padding: "10px 8px", textAlign: "right", fontWeight: 600 }}>{fmt(actualLinesSum)}</td>
+                            <td className="num" style={{ padding: "10px 8px", textAlign: "right", fontWeight: 600, color: "var(--text3)" }}>{fmt(actualLinesEst)}</td>
+                            <td className="num" style={{ padding: "10px 8px", textAlign: "right", fontWeight: 600,
+                              color: actualLinesSum - actualLinesEst > 0.005 ? "var(--red)" : actualLinesSum - actualLinesEst < -0.005 ? "var(--green)" : "var(--text3)" }}>
+                              {actualLinesSum - actualLinesEst > 0 ? "+" : ""}{fmt(actualLinesSum - actualLinesEst)}
+                            </td>
+                            <td />
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* The margin — the reason the actual cost is keyed at all. ราคาเสนอ is the revenue
+                  side (typed per garment), the actual cost is whatever the active mode resolves to. */}
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+                {n(form.offer_price) <= 0 && (
+                  <div style={{ fontSize: 12, color: "#b45309", marginBottom: 8 }}>
+                    ยังไม่ได้ใส่ราคาเสนอ/งบ (ในหัวข้อ “ตั้งค่าต้นทุน”) — กำไรจริงจึงยังคำนวณไม่ได้
+                  </div>
+                )}
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ fontSize: 14, minWidth: 420, width: "100%" }}>
+                    <thead>
+                      <tr style={{ color: "var(--text3)", fontSize: 12 }}>
+                        <th style={{ padding: "6px 8px", textAlign: "left" }}>เทียบราคาเสนอ</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>/ ตัว</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>รวมทั้งออเดอร์</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderTop: "1px solid var(--border)" }}>
+                        <td style={{ padding: "8px" }}>ราคาเสนอ/งบ (รายได้)</td>
+                        <td className="num" style={{ padding: "8px", textAlign: "right" }}>{fmt(n(form.offer_price))}</td>
+                        <td className="num" style={{ padding: "8px", textAlign: "right" }}>{orderQty > 0 ? fmt(offerTotal) : "—"}</td>
+                      </tr>
+                      <tr style={{ borderTop: "1px solid var(--border)" }}>
+                        <td style={{ padding: "8px" }}>ต้นทุนจริง</td>
+                        <td className="num" style={{ padding: "8px", textAlign: "right" }}>{orderQty > 0 ? fmt(actualPerPiece) : "—"}</td>
+                        <td className="num" style={{ padding: "8px", textAlign: "right" }}>{fmt(actualOrderTotal)}</td>
+                      </tr>
+                      {/* Reference only — what the estimate said this would cost, for context. */}
+                      <tr style={{ borderTop: "1px solid var(--border)", color: "var(--text3)" }}>
+                        <td style={{ padding: "8px" }}>ประมาณการต้นทุน</td>
+                        <td className="num" style={{ padding: "8px", textAlign: "right" }}>{fmt(bd.totalCost)}</td>
+                        <td className="num" style={{ padding: "8px", textAlign: "right" }}>{orderQty > 0 ? fmt(bd.totalCost * orderQty) : "—"}</td>
+                      </tr>
+                      {(() => {
+                        const perPc = n(form.offer_price) - actualPerPiece;
+                        const tot = offerTotal - actualOrderTotal;
+                        const col = tot >= 0 ? "var(--green)" : "var(--red)";
+                        const live = n(form.offer_price) > 0 && actualOrderTotal > 0 && orderQty > 0;
+                        return (
+                          <tr style={{ borderTop: "2px solid var(--border2)" }}>
+                            <td style={{ padding: "10px 8px", fontWeight: 600 }}>กำไรจริง</td>
+                            <td className="num" style={{ padding: "10px 8px", textAlign: "right", fontWeight: 600, color: live ? col : "var(--text3)" }}>
+                              {live ? `${perPc >= 0 ? "+" : ""}${fmt(perPc)}` : "—"}
+                            </td>
+                            <td className="num" style={{ padding: "10px 8px", textAlign: "right", fontWeight: 700, fontSize: 15, color: live ? col : "var(--text3)" }}>
+                              {live ? `${tot >= 0 ? "+" : ""}฿${fmt(tot)}` : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </SectionCard>
+          )}
+
           {/* ── Estimate vs actual + actual-cost log (existing orders only) ── */}
           {!isNew && (
             <SectionCard title="ต้นทุนจริง vs ประมาณการ">
@@ -1091,107 +1458,16 @@ export default function CostingEditor() {
               <button className="small" style={{ padding: "5px 12px", marginTop: 4 }} onClick={addActual}>+ เพิ่มรายการจริง</button>
             </SectionCard>
           )}
-        </div>
-
-        {/* ── Live cost summary — the itemized "costing sheet", full-width at the bottom.
-            Left = per-piece breakdown table; right = whole-order totals. Stacks on mobile. ── */}
-        <div className="card" style={{ padding: 20, marginTop: 4 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 500, color: "var(--text2)", marginBottom: 16 }}>สรุปต้นทุน (สด)</h2>
-          <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "flex-start", justifyContent: "center" }}>
-            {/* Itemized sheet — two value columns: per garment and order total (× จำนวนสั่ง). */}
-            <div style={{ flex: "1 1 420px", maxWidth: 560 }}>
-              <table style={{ fontSize: 14, width: "100%" }}>
-                <thead>
-                  <tr style={{ color: "var(--text3)", fontSize: 12 }}>
-                    <th style={{ border: "none", padding: "0 0 6px", textAlign: "left", fontWeight: 400 }}>รายการ</th>
-                    <th style={{ border: "none", padding: "0 0 6px", textAlign: "right", fontWeight: 400 }}>/ ตัว</th>
-                    <th style={{ border: "none", padding: "0 0 6px", textAlign: "right", fontWeight: 400 }}>
-                      รวมทั้งออเดอร์{orderQty > 0 ? ` (× ${orderQty.toLocaleString()})` : ""}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {breakdownRows.map(([label, val]) => (
-                    <tr key={label}>
-                      <td style={{ border: "none", padding: "6px 0", color: "var(--text2)" }}>{label}</td>
-                      <td className="num" style={{ border: "none", padding: "6px 0", textAlign: "right" }}>{fmt(val)}</td>
-                      <td className="num" style={{ border: "none", padding: "6px 0", textAlign: "right", color: "var(--text2)" }}>{orderQty > 0 ? fmt(val * orderQty) : "—"}</td>
-                    </tr>
-                  ))}
-                  <tr>
-                    <td style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600 }}>ต้นทุนรวม</td>
-                    <td className="num" style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600, fontSize: 15, textAlign: "right" }}>{fmt(bd.totalCost)}</td>
-                    <td className="num" style={{ borderTop: "2px solid var(--border2)", borderBottom: "none", padding: "10px 0 6px", fontWeight: 600, fontSize: 15, textAlign: "right" }}>{orderQty > 0 ? fmt(bd.totalCost * orderQty) : "—"}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ border: "none", padding: "6px 0", color: "var(--green)" }}>กำไร ({form.profit_pct || 0}%)</td>
-                    <td className="num" style={{ border: "none", padding: "6px 0", color: "var(--green)", textAlign: "right" }}>{fmt(bd.profit)}</td>
-                    <td className="num" style={{ border: "none", padding: "6px 0", color: "var(--green)", textAlign: "right" }}>{orderQty > 0 ? fmt(bd.profit * orderQty) : "—"}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)" }}>ราคาขาย</td>
-                    <td className="num" style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)", fontSize: 17, textAlign: "right" }}>{fmt(bd.sellingPrice)}</td>
-                    <td className="num" style={{ border: "none", padding: "6px 0", fontWeight: 700, color: "var(--accent)", fontSize: 17, textAlign: "right" }}>{orderQty > 0 ? fmt(bd.sellingPrice * orderQty) : "—"}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Whole-order totals. Shows when there's an order qty OR an offered price entered.
-                The offered price is DISPLAY-ONLY — it never feeds computeCosting or any total above. */}
-            {(orderQty > 0 || n(form.offer_price) > 0) && (() => {
-              const offer = n(form.offer_price);
-              return (
-                <div style={{ flex: "1 1 240px", maxWidth: 340, background: "var(--bg3)", borderRadius: "var(--r)", padding: "16px 18px", fontSize: 14 }}>
-                  {orderQty > 0 && (
-                    <>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                        <span style={{ color: "var(--text3)" }}>จำนวนสั่ง</span>
-                        <span style={{ fontFamily: "var(--mono)" }}>{orderQty.toLocaleString()} ตัว</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                        <span style={{ color: "var(--text3)" }}>ต้นทุนทั้งออเดอร์</span>
-                        <span style={{ fontFamily: "var(--mono)" }}>฿{fmt(bd.totalCost * orderQty)}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-                        <span style={{ color: "var(--text3)" }}>มูลค่าขายทั้งออเดอร์</span>
-                        <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", fontWeight: 600 }}>฿{fmt(bd.sellingPrice * orderQty)}</span>
-                      </div>
-                    </>
-                  )}
-                  {offer > 0 && (
-                    <>
-                      <div style={{ display: "flex", justifyContent: "space-between", paddingTop: orderQty > 0 ? 10 : 0, marginTop: orderQty > 0 ? 10 : 0, borderTop: orderQty > 0 ? "1px solid var(--border)" : "none" }}>
-                        <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ต่อตัว)</span>
-                        <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offer)}</span>
-                      </div>
-                      {orderQty > 0 && (() => {
-                        // The offer is typed PER GARMENT, so the order-level budget is offer × จำนวนสั่ง.
-                        // Margin compares that against the computed order cost — both whole-order figures
-                        // (comparing the per-piece offer against the order cost was the old bug).
-                        const offerTotal = offer * orderQty;
-                        const margin = offerTotal - bd.totalCost * orderQty;
-                        return (
-                          <>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-                              <span style={{ color: "var(--text3)" }}>ราคาเสนอ/งบ (ทั้งออเดอร์)</span>
-                              <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>฿{fmt(offerTotal)}</span>
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
-                              <span style={{ color: "var(--text3)" }}>กำไรถ้ารับราคานี้</span>
-                              <span style={{ fontFamily: "var(--mono)", color: margin >= 0 ? "var(--green)" : "var(--red)" }}>
-                                {margin >= 0 ? "+" : ""}฿{fmt(margin)}
-                              </span>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
+          {/* Photos live under the order's id in R2, so they need a saved order first. */}
+          <SectionCard title="รูปภาพ (ตัวอย่าง / แบบ / งานเสร็จ)">
+            {isNew ? (
+              <div style={{ fontSize: 13, color: "var(--text3)" }}>บันทึกออเดอร์ก่อน แล้วจึงใส่รูปได้</div>
+            ) : (
+              <ImageGallery images={images} scope="order" id={id} max={12}
+                onPersist={async (next) => { await setCostingImages(id, next); setImages(next); }}
+                onError={(m) => notify(m, "error")} />
+            )}
+          </SectionCard>
         </div>
       </div>
 

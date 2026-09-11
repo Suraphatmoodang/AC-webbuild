@@ -76,6 +76,7 @@ import type { StoredImage } from "./images";
 //     cutting_loss_pct numeric not null default 5,
 //     offer_price numeric not null default 0,   -- offered/budget price PER GARMENT (kept for budget-vs-actual; not in the cost math). Add via: alter table product_costings add column offer_price numeric not null default 0
 //     actual_entries jsonb not null default '[]',   -- Phase D: hand-logged actual costs
+//     actual_costing jsonb not null default '{}',   -- close-out actual cost (mode + total + cloned lines)
 //     note text not null default '',
 //     created_by text not null default '',
 //     created_at timestamptz not null default now(),
@@ -204,6 +205,135 @@ export const ACTUAL_CATEGORIES = [
 export type ActualCategory = (typeof ACTUAL_CATEGORIES)[number]["key"];
 export type ActualEntry = { date: string; category: ActualCategory; label: string; amount: number; note: string };
 
+// ── Actual cost at close-out — TWO MODES ─────────────────────────────
+// Once an order is on the floor, what it really cost stops being a projection. Two ways
+// to record that, chosen per order (neither is computed — both are what was actually paid):
+//   · "static" — ONE number, the order's real cost, set against ราคาเสนอ/งบ to give the true
+//     margin. Typed either per garment or as an order total; the two are linked through
+//     จำนวนสั่ง and only the TOTAL is stored (per-piece is always derived, so it can never
+//     drift out of step with the quantity).
+//   · "lines"  — a CLONE of the order's own cost lines (every ผ้า / อุปกรณ์ / ค่าตกแต่ง line, the
+//     four labor buckets and โสหุ้ย), each re-keyed with the quantity really used and the price
+//     really paid, plus any cost that was never in the estimate at all.
+// The clone is a SNAPSHOT: each line carries the estimate it was cloned from (`est`), so the
+// variance stays meaningful even if someone edits the estimate afterwards. Re-clone to refresh.
+// Both modes live in ONE JSONB column, so adding the second mode needed no second migration:
+//   alter table product_costings add column if not exists actual_costing jsonb not null default '{}';
+export const ACTUAL_MODES = [
+  { key: "static", th: "แบบรวม (ราคาเดียว)",        hint: "กรอกต้นทุนจริงตัวเลขเดียว แล้วเทียบกับราคาเสนอ" },
+  { key: "lines",  th: "แบบแยกรายการ (โคลนออเดอร์)", hint: "โคลนรายการต้นทุนของออเดอร์ แล้วใส่จำนวน/ราคาจริงทีละรายการ" },
+] as const;
+export type ActualMode = (typeof ACTUAL_MODES)[number]["key"];
+
+// The cloned lines keep the order's own cost groups, so a line can always be read back to
+// the part of the estimate it came from. "other" is for costs added after the fact.
+export const ACTUAL_GROUPS = [
+  { key: "fabric",   th: "ผ้า",        color: "#2563eb" },
+  { key: "acc",      th: "อุปกรณ์",     color: "#b45309" },
+  { key: "service",  th: "ค่าตกแต่ง",   color: "#6d28d9" },
+  { key: "labor",    th: "ค่าแรง",      color: "#16a34a" },
+  { key: "overhead", th: "โสหุ้ย",      color: "#64748b" },
+  { key: "other",    th: "เพิ่มเติม",    color: "#dc2626" },
+] as const;
+export type ActualGroup = (typeof ACTUAL_GROUPS)[number]["key"];
+export function actualGroupMeta(key: string) {
+  return ACTUAL_GROUPS.find((g) => g.key === key) ?? ACTUAL_GROUPS[ACTUAL_GROUPS.length - 1];
+}
+
+// `ref` ties a line back to the estimate line it was cloned from (fab:0 · ext:3 · labor:cut ·
+// overhead), so a re-clone can be recognised; lines added by hand get an x:… ref and no est.
+export type ActualLine = {
+  ref: string; group: ActualGroup; label: string; unit: string;
+  qty: number; price: number; est: number; note: string;
+};
+export type ActualCosting = { mode: ActualMode; total: number; lines: ActualLine[] };
+
+// The two modes only make sense once the goods are actually being made — before that there
+// is nothing real to key. Anything earlier (ใบเสนอราคา / ยืนยันแล้ว) is still a projection.
+export const ACTUAL_STATUSES: string[] = ["production", "shipped", "done"];
+export function showsActualCosting(status: string): boolean {
+  return ACTUAL_STATUSES.includes(status);
+}
+
+const acNum = (v: any) => (isFinite(Number(v)) ? Number(v) : 0);
+
+// Every read goes through this, so a missing column / null / hand-edited junk all come back
+// as a valid empty record — same defence as normalizeImages on the image keys.
+export function normalizeActualCosting(v: any): ActualCosting {
+  const src = v && typeof v === "object" && !Array.isArray(v) ? (v as any) : {};
+  const lines: ActualLine[] = Array.isArray(src.lines)
+    ? src.lines.map((l: any, i: number) => ({
+        ref: String(l?.ref ?? `x:${i}`),
+        group: (ACTUAL_GROUPS.some((g) => g.key === l?.group) ? l.group : "other") as ActualGroup,
+        label: String(l?.label ?? ""), unit: String(l?.unit ?? ""),
+        qty: acNum(l?.qty), price: acNum(l?.price), est: acNum(l?.est), note: String(l?.note ?? ""),
+      }))
+    : [];
+  return { mode: src.mode === "lines" ? "lines" : "static", total: acNum(src.total), lines };
+}
+
+export function actualLineTotal(l: { qty: number; price: number }): number {
+  return acNum(l.qty) * acNum(l.price);
+}
+export function actualLinesTotal(lines: { qty: number; price: number }[]): number {
+  return lines.reduce((s, l) => s + actualLineTotal(l), 0);
+}
+// The order's actual cost under whichever mode it's in — one figure both modes can be read as.
+export function actualCostTotal(ac: ActualCosting): number {
+  return ac.mode === "lines" ? actualLinesTotal(ac.lines) : acNum(ac.total);
+}
+
+// Build the "lines" mode from the order's own estimate. Quantities and prices come across as
+// they were estimated (that's the point — you edit the ones that moved), and each line records
+// its estimate so the variance survives later edits to the estimate itself.
+export function cloneActualLines(c: {
+  fabric_lines: FabricLine[]; extras: ExtraLine[];
+  cut_labor: number; qc_labor: number; sew_labor: number; pack_labor: number;
+  overhead_pc: number; order_qty: number;
+}): ActualLine[] {
+  const qty = acNum(c.order_qty);
+  const line = (ref: string, group: ActualGroup, label: string, unit: string, q: number, p: number, note = ""): ActualLine =>
+    ({ ref, group, label, unit, qty: q, price: p, est: q * p, note });
+  const lines: ActualLine[] = [];
+
+  c.fabric_lines.forEach((f, i) => {
+    const label = [f.label, f.fabric_type, f.color].map((x) => String(x ?? "").trim()).filter(Boolean).join(" · ")
+      || String(f.code ?? "").trim() || "ผ้า";
+    lines.push(line(`fab:${i}`, "fabric", label, f.unit || "หลา", acNum(f.yard_per_pc), acNum(f.price_per_yard)));
+  });
+
+  c.extras.forEach((e, i) => {
+    const kind = extraKind(e);
+    // A เหมา line has no unit count, so it clones as 1 × its lump sum — still editable as
+    // จำนวน × ราคา if the real bill turned out to be itemised.
+    const flat = e.mode !== "qty";
+    lines.push(line(
+      `ext:${i}`, kind,
+      String(e.label ?? "").trim() || (kind === "service" ? "ค่าตกแต่ง" : "อุปกรณ์"),
+      flat ? "เหมา" : (e.unit || "ชิ้น"),
+      flat ? 1 : acNum(e.qty_per_pc),
+      flat ? acNum(e.amount) : acNum(e.unit_price),
+      String(e.desc ?? "").trim(),
+    ));
+  });
+
+  // Labor is typed per piece, so it clones as จำนวนสั่ง × อัตรา — the actual columns then take
+  // the pieces really made and the rate really paid. NOTE the historical column swap:
+  // qc_labor holds เย็บ and sew_labor holds QC (เช็ค). Empty buckets aren't cloned.
+  const labor: [string, string, number][] = [
+    ["cut", "ค่าตัด", acNum(c.cut_labor)],
+    ["sew", "ค่าเย็บ", acNum(c.qc_labor)],
+    ["qc", "ค่า QC", acNum(c.sew_labor)],
+    ["pack", "ค่าแพ็ค", acNum(c.pack_labor)],
+  ];
+  for (const [key, label, rate] of labor) if (rate > 0) lines.push(line(`labor:${key}`, "labor", label, "ตัว", qty, rate));
+
+  const oh = acNum(c.overhead_pc);
+  if (oh > 0) lines.push(line("overhead", "overhead", "โสหุ้ย", "ตัว", qty, oh));
+
+  return lines;
+}
+
 export type ProductCosting = {
   id: string;
   status: string;
@@ -261,6 +391,10 @@ export type ProductCosting = {
   offer_price: number;   // offered/budget price PER GARMENT (same basis as sellingPrice; × order_qty for the
                          // order-level budget) — stored for budget-vs-actual; NOT in the cost math
   actual_entries: ActualEntry[];   // Phase D: hand-logged actual costs (JSONB)
+  // Close-out actual cost, in one of two modes (แบบรวม / แบบแยกรายการ) — see ACTUAL_MODES.
+  // Optional until the migration runs; normalizeActualCosting turns an absent column into
+  // an empty record, and a save that predates the column drops the field instead of failing.
+  actual_costing?: ActualCosting | null;
   // Photos of the order (ตัวอย่าง / แบบ / งานเสร็จ) — R2 keys only (JSONB); the bytes
   // live in Cloudflare R2. See lib/images.ts. Optional until the migration runs, and
   // saved through setCostingImages rather than the order form, so a form save can't
@@ -383,10 +517,46 @@ export async function getCosting(id: string): Promise<ProductCosting | null> {
   return data as ProductCosting;
 }
 
+// ── Pre-migration resilience ─────────────────────────────────────────
+// `product_costings` has grown columns over time (actual_entries, images, actual_costing) and
+// the ALTERs are applied BY HAND in Supabase (there is no sql/ folder — see CLAUDE.md). Without
+// this, every save on the page breaks the moment code ships ahead of the migration. So: when
+// Postgres rejects a write for an unknown column (42703), drop that field from the payload and
+// retry. The order still saves; only the not-yet-migrated field is lost — which is exactly what
+// the code promises elsewhere ("actuals unsaved until applied"). Bounded so it can't spin.
+// The same failure reaches us worded two different ways, so match BOTH:
+//   · PostgREST (what supabase-js normally surfaces, PGRST204):
+//       Could not find the 'actual_costing' column of 'product_costings' in the schema cache
+//   · Postgres itself (42703, e.g. once the schema cache has refreshed):
+//       column "actual_costing" of relation "product_costings" does not exist
+function missingColumn(error: any): string | null {
+  const msg = String(error?.message ?? "");
+  const m = /could not find the '([^']+)' column/i.exec(msg)
+    ?? /column "([^"]+)" of relation ".*" does not exist/i.exec(msg);
+  return m ? m[1] : null;
+}
+
+async function writeCosting<T extends Record<string, any>>(
+  payload: T,
+  // PromiseLike, not Promise: a Supabase query builder is thenable but isn't a real Promise.
+  run: (p: T) => PromiseLike<{ data: any; error: any }>,
+): Promise<ProductCosting> {
+  let body = payload;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data, error } = await run(body);
+    if (!error) return data as ProductCosting;
+    const col = missingColumn(error);
+    if (!col || !(col in body)) throw error;
+    console.warn(`product_costings.${col} ยังไม่มีในฐานข้อมูล — บันทึกโดยข้ามคอลัมน์นี้ (ต้อง ALTER TABLE ก่อน)`);
+    const { [col]: _drop, ...rest } = body as any;
+    body = rest as T;
+  }
+  throw new Error("บันทึกไม่สำเร็จ");
+}
+
 export async function addCosting(input: CostingInput): Promise<ProductCosting> {
-  const { data, error } = await supabase.from("product_costings").insert(input).select().single();
-  if (error) throw error;
-  return data as ProductCosting;
+  return writeCosting(input as Record<string, any>, (p) =>
+    supabase.from("product_costings").insert(p).select().single());
 }
 
 // Bulk-insert orders (used by the Excel importer). Chunked to stay under request limits.
@@ -404,14 +574,8 @@ export async function addCostingsBulk(inputs: CostingInput[]): Promise<number> {
 }
 
 export async function updateCosting(id: string, input: Partial<CostingInput>): Promise<ProductCosting> {
-  const { data, error } = await supabase
-    .from("product_costings")
-    .update({ ...input, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as ProductCosting;
+  return writeCosting({ ...input, updated_at: new Date().toISOString() } as Record<string, any>, (p) =>
+    supabase.from("product_costings").update(p).eq("id", id).select().single());
 }
 
 // Save the order's JSONB list of R2 image keys. Kept separate from updateCosting so a
