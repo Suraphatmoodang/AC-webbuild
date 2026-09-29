@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import { useRequireAccess } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { matchesQuery } from "@/lib/search-match";
-import { buildFabricMatchIndex, fabricMatchKeyForRow, applyFabricUpdates, getSuppliers,
+import { buildFabricMatchIndex, fabricMatchKeyForRow, fabricIndexKeys, applyFabricUpdates, getSuppliers,
   type Fabric, type Supplier, type FabricUpdatableField } from "@/lib/fabric-store";
 import { parseFabricSheet, resolveFabricColumns, type FabricSheetRow } from "@/lib/fabric-sheet";
 import { usePagination, PaginationBar } from "@/lib/pagination";
@@ -18,6 +18,8 @@ const UPDATE_COLUMNS: { field: FabricUpdatableField; label: string; sheetKey: st
   { field: "unit_cost",    label: "ราคาต่อหน่วย",  sheetKey: "unit_cost" },
   { field: "unit",         label: "หน่วย",         sheetKey: "unit" },
   { field: "cost_unit",    label: "หน่วยราคา",     sheetKey: "cost_unit" },
+  // ชนิดผ้า is part of the identity key — see the caution strip and typeCollision() below.
+  { field: "fabric_type",  label: "ชนิดผ้า",        sheetKey: "fabric_type" },
   { field: "composition",  label: "เส้นใย",        sheetKey: "composition" },
   { field: "construction", label: "โครงสร้าง",     sheetKey: "construction" },
   { field: "weight",       label: "น้ำหนัก",       sheetKey: "weight" },
@@ -154,6 +156,9 @@ export default function FabricStockUpdatePage() {
       case "weight":       return Number(a.weight) !== r.weight;
       case "unit":         return !sameStr(a.unit, r.unit);
       case "cost_unit":    return !sameStr(a.cost_unit, r.cost_unit);
+      // A blank sheet cell can never clear ชนิดผ้า (the store refuses it), so an empty
+      // value is not a change — otherwise every code-less row would look "changed".
+      case "fabric_type":  return !!r.fabric_type.trim() && !sameStr(a.fabric_type, r.fabric_type);
       case "composition":  return !sameStr(a.composition, r.composition);
       case "construction": return !sameStr(a.construction, r.construction);
       case "width":        return !sameStr(a.width, r.width);
@@ -181,8 +186,29 @@ export default function FabricStockUpdatePage() {
   // Overwrite mode disables this so matched rows apply even when unchanged.
   const modeArr = Array.from(mode);
   const isNoop = (r: Row) => !overwrite && modeArr.length > 0 && !modeArr.some((f) => fieldChanged(r, f));
+  // ── ชนิดผ้า collision check ──
+  // Rewriting ชนิดผ้า moves the fabric onto a different identity key (C = type|code|color|
+  // width, D = type|construction|color|width). If ANOTHER fabric already sits on that key the
+  // two become indistinguishable — find-mode matching would report "ซ้ำ" from then on and the
+  // import dedupe would treat them as one row. So such a row is flagged and NOT selectable.
+  const typeCollision = (r: Row): Fabric | null => {
+    if (!mode.has("fabric_type") || !matchData || !r._matchId) return null;
+    if (!fieldChanged(r, "fabric_type")) return null;
+    for (const k of fabricIndexKeys({
+      fabric_type: r.fabric_type, fabric_code: r.fabric_code,
+      construction: r.construction, color: r.color, width: r.width,
+    })) {
+      const other = (matchData.identity.get(k) ?? []).find((f) => f.id !== r._matchId);
+      if (other) return other;
+    }
+    return null;
+  };
+  const collisionCount = mode.has("fabric_type")
+    ? rows.filter((r) => r._match === "one" && !!typeCollision(r)).length
+    : 0;
+
   // Selectable = single match AND (no mode chosen yet, or at least one selected field differs)
-  const isSelectable = (r: Row) => r._match === "one" && !isNoop(r);
+  const isSelectable = (r: Row) => r._match === "one" && !isNoop(r) && !typeCollision(r);
 
   // Visible rows (status filter + search)
   const visible = rows.map((r, i) => ({ r, i })).filter(({ r }) => {
@@ -219,7 +245,9 @@ export default function FabricStockUpdatePage() {
   const doApply = async () => {
     const fields = Array.from(mode);
     if (fields.length === 0) { showToast("กรุณาเลือกคอลัมน์ที่จะอัปเดต", "error"); return; }
-    const chosenIdx = Array.from(selected).filter((i) => rows[i] && rows[i]._match === "one" && rows[i]._matchId && !isNoop(rows[i]));
+    // Same gate as the checkboxes (isSelectable), so a row that became unselectable after
+    // the mode changed — a ชนิดผ้า collision, say — can never slip through to the write.
+    const chosenIdx = Array.from(selected).filter((i) => rows[i] && rows[i]._matchId && isSelectable(rows[i]));
     const chosen = chosenIdx.map((i) => rows[i]);
     if (chosen.length === 0) { showToast("ไม่มีรายการที่ต้องอัปเดต (ค่าตรงกันอยู่แล้ว)", "error"); return; }
 
@@ -233,6 +261,7 @@ export default function FabricStockUpdatePage() {
         unit_cost: r.unit_cost,
         unit: r.unit,
         cost_unit: r.cost_unit,
+        fabric_type: r.fabric_type,
         composition: r.composition,
         construction: r.construction,
         weight: r.weight,
@@ -357,6 +386,19 @@ export default function FabricStockUpdatePage() {
               ⚠ การอัปเดตสต็อคจะลบล็อตเดิมทั้งหมดและสร้างล็อตใหม่ (ราคาจากไฟล์ หรือราคาปัจจุบันหากไม่มี)
             </div>
           )}
+          {/* ชนิดผ้า is the only updatable column that is part of the identity key, so it
+              gets its own warning: in find mode you'd be matching on the very value you're
+              about to rewrite, which works once and then can't be re-run. */}
+          {mode.has("fabric_type") && (
+            <div style={{ fontSize: 13, background: "#fef3c7", color: "#92400e", padding: "10px 14px",
+              borderRadius: "var(--r)", lineHeight: 1.6, marginTop: 8 }}>
+              <b>ชนิดผ้า เป็นส่วนหนึ่งของคีย์จับคู่</b> — การแก้จะย้ายรายการไปอยู่คีย์ใหม่
+              {matchMode === "find" && <> · แนะนำให้ใช้โหมด <b>ตรงกันเป๊ะจาก id</b> เพราะโหมดค้นหาจับคู่ด้วยค่าเดิมที่กำลังจะถูกเขียนทับ</>}
+              {collisionCount > 0 && (
+                <> · <b style={{ color: "var(--red)" }}>{collisionCount} รายการชนกับผ้าอื่นที่มีคีย์เดียวกัน</b> — ถูกข้ามไว้ ไม่ให้เลือก</>
+              )}
+            </div>
+          )}
           {noopCount > 0 && (
             <div style={{ marginTop: 10, fontSize: 13, color: "var(--text3)" }}>
               ข้าม {noopCount} รายการที่ค่าตรงกับข้อมูลปัจจุบันอยู่แล้ว (เปิด "เขียนทับ" เพื่ออัปเดตด้วย)
@@ -451,8 +493,19 @@ export default function FabricStockUpdatePage() {
                       <td><OwnerTag owner={r.owner} /></td>
                       <td>
                         {r._match === "one"
-                          ? (noop ? <span style={{ fontSize: 14, color: "var(--text3)" }}>ค่าตรงกันแล้ว</span>
-                                  : <span style={{ fontSize: 14, color: "var(--green)" }}>✓ ตรงกัน</span>)
+                          ? (() => {
+                              // A ชนิดผ้า collision outranks the other statuses — it's the reason
+                              // the row can't be applied, so say so instead of "✓ ตรงกัน".
+                              const clash = typeCollision(r);
+                              if (clash) return (
+                                <span style={{ fontSize: 13, color: "var(--red)", cursor: "help" }}
+                                  title={`ชนิดผ้าใหม่ "${r.fabric_type}" จะชนกับผ้าที่มีอยู่แล้ว:\n${clash.fabric_type} · ${clash.color} · ${clash.width}\nแก้ชื่อให้ไม่ซ้ำ หรือแก้รายการนี้ในหน้า จัดการ`}>
+                                  ⚠ ชนิดผ้าซ้ำ
+                                </span>
+                              );
+                              return noop ? <span style={{ fontSize: 14, color: "var(--text3)" }}>ค่าตรงกันแล้ว</span>
+                                          : <span style={{ fontSize: 14, color: "var(--green)" }}>✓ ตรงกัน</span>;
+                            })()
                           : r._match === "multi"
                             ? <span className="badge badge-low" style={{ cursor: "help" }}
                                 title={"จับคู่ได้หลายรายการ (เจ้าของ/เลขที่ ต่างกันแต่ระบุตัวไม่ได้):\n" +

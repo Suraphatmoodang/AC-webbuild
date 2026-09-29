@@ -960,9 +960,15 @@ export async function adjustFabricLot(lotId: string, newRemaining: number): Prom
 
 // ── Stock Updater (bulk update existing fabrics by matching) ─────
 
+// NOTE on `fabric_type`: unlike every other field here it is part of BOTH identity keys
+// (see cKey/dKey below), so writing it MOVES the fabric to a different key. That's fine —
+// it's how a mis-typed ชนิดผ้า gets corrected — but it means two things for callers:
+// prefer EXACT (by id) matching when writing it, and check the destination key isn't
+// already occupied by another fabric, or the two become indistinguishable to find-mode
+// matching and to the import dedupe. pages/fabrics/stock-update.tsx does both.
 export type FabricUpdatableField =
   | "quantity" | "min_quantity" | "unit_cost" | "unit" | "cost_unit"
-  | "composition" | "construction" | "weight" | "width" | "row_label" | "owner" | "supplier";
+  | "fabric_type" | "composition" | "construction" | "weight" | "width" | "row_label" | "owner" | "supplier";
 
 // Build a code-aware match index over existing fabrics.
 // Two key shapes: C = type|code|color|width ; D = type|construction|color|width.
@@ -984,7 +990,7 @@ const cKey = (f: { fabric_type: string; fabric_code: string; color: string; widt
 // Keys under which an EXISTING fabric is indexed. A coded item is reachable both by
 // its precise C-key AND by a code-less D-key, so an update-sheet row that omits the
 // code can still match it (matched only when the D-fields are unambiguous).
-function fabricIndexKeys(f: {
+export function fabricIndexKeys(f: {
   fabric_type: string; fabric_code: string; construction: string; color: string; width: string;
 }): string[] {
   return f.fabric_code.trim() ? [cKey(f), dKey(f)] : [dKey(f)];
@@ -1022,6 +1028,7 @@ export async function applyFabricUpdates(
     unit_cost?: number;      // sheet price (for the replacement lot / field)
     unit?: string;
     cost_unit?: string;
+    fabric_type?: string;    // identity field — see the note on FabricUpdatableField
     composition?: string;
     construction?: string;
     weight?: number;
@@ -1047,6 +1054,9 @@ export async function applyFabricUpdates(
       if (fields.includes("unit_cost") && u.unit_cost !== undefined) patch.unit_cost = u.unit_cost;
       if (fields.includes("unit") && u.unit !== undefined) patch.unit = u.unit;
       if (fields.includes("cost_unit") && u.cost_unit !== undefined) patch.cost_unit = u.cost_unit;
+      // Guard: ชนิดผ้า is required on a fabric, so never let a blank sheet cell erase it.
+      if (fields.includes("fabric_type") && u.fabric_type !== undefined && u.fabric_type.trim())
+        patch.fabric_type = u.fabric_type.trim();
       if (fields.includes("composition") && u.composition !== undefined) patch.composition = u.composition;
       if (fields.includes("construction") && u.construction !== undefined) patch.construction = u.construction;
       if (fields.includes("weight") && u.weight !== undefined) patch.weight = u.weight;

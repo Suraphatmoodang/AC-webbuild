@@ -5,6 +5,10 @@ import { useRequireAccess, type Section } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { matchesQuery } from "@/lib/search-match";
+import {
+  parseSupplierSheet, planSupplierImport,
+  type PlannedRow, type SupplierSheetResult,
+} from "@/lib/supplier-sheet";
 
 type FormData = Omit<Supplier, "id" | "created_at" | "updated_at">;
 
@@ -50,6 +54,17 @@ export function SuppliersView({ api, section }: { api: SupplierApi; section: Sec
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast]   = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  // ── Excel import ──
+  // Suppliers used to be add-one-at-a-time only, which meant 30+ manual entries when a
+  // stock sheet arrived carrying suppliers the table didn't have yet. The panel below
+  // previews the file first and NEVER overwrites a saved value — see importing notes.
+  const [impOpen, setImpOpen]   = useState(false);
+  const [impName, setImpName]   = useState("");
+  const [impRes, setImpRes]     = useState<SupplierSheetResult | null>(null);
+  const [impPlan, setImpPlan]   = useState<PlannedRow[]>([]);
+  const [impErr, setImpErr]     = useState("");
+  const [impFill, setImpFill]   = useState(true);   // also top up blanks on existing rows
+  const [impBusy, setImpBusy]   = useState(false);
 
   // Auth gate — suppliers are "ops" work, so the section admin, the auditor (both
   // sections) and super can all open it. Scoped to whichever section rendered it.
@@ -97,6 +112,73 @@ export function SuppliersView({ api, section }: { api: SupplierApi; section: Sec
     } catch (e: any) {
       showToast(e.message ?? "เกิดข้อผิดพลาด", "error");
     } finally { setSaving(false); }
+  };
+
+  // ── Excel import ───────────────────────────────────────────────
+  // `xlsx` is loaded on demand: it's a large dependency and this page is opened far
+  // more often to look something up than to import a file.
+  const pickImportFile = async (file: File) => {
+    setImpErr(""); setImpRes(null); setImpPlan([]); setImpName(file.name);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) { setImpErr("ไม่พบชีตในไฟล์"); return; }
+      // raw:false → the text as displayed, so a phone number typed as 0812345678 keeps
+      // its leading zero instead of arriving as the number 812345678.
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }) as any[][];
+      const res = parseSupplierSheet(raw);
+      if (res.missingName) {
+        setImpErr("ไม่พบคอลัมน์ “ชื่อบริษัทซัพ” — ต้องมีคอลัมน์ชื่อซัพพลายเออร์อย่างน้อยหนึ่งคอลัมน์");
+        return;
+      }
+      if (res.rows.length === 0) { setImpErr("ไม่พบรายการซัพพลายเออร์ในไฟล์"); return; }
+      setImpRes(res);
+      setImpPlan(planSupplierImport(res.rows, items as any));
+    } catch (e: any) {
+      setImpErr(e?.message ?? "อ่านไฟล์ไม่สำเร็จ");
+    }
+  };
+
+  const impCounts = {
+    new:       impPlan.filter((p) => p.plan === "new").length,
+    fillable:  impPlan.filter((p) => p.plan === "fillable").length,
+    existing:  impPlan.filter((p) => p.plan === "existing").length,
+    duplicate: impPlan.filter((p) => p.plan === "duplicate").length,
+  };
+
+  const closeImport = () => {
+    setImpOpen(false); setImpRes(null); setImpPlan([]); setImpErr(""); setImpName("");
+  };
+
+  const runImport = async () => {
+    setImpBusy(true);
+    let added = 0, filled = 0;
+    const failed: string[] = [];
+    try {
+      // One row at a time so a single bad row can't lose the whole batch — the counts
+      // reported at the end are what actually landed, not what was attempted.
+      for (const p of impPlan) {
+        try {
+          if (p.plan === "new") { await api.add(p.row); added++; }
+          else if (p.plan === "fillable" && impFill && p.existingId) {
+            await api.update(p.existingId, p.fills); filled++;
+          }
+        } catch (e: any) {
+          failed.push(p.row.supplier_name);
+        }
+      }
+      await refresh();
+      closeImport();
+      const parts = [added ? `เพิ่ม ${added}` : "", filled ? `เติมข้อมูล ${filled}` : ""].filter(Boolean);
+      showToast(
+        (parts.length ? parts.join(" · ") : "ไม่มีรายการใหม่") +
+          (failed.length ? ` · ไม่สำเร็จ ${failed.length}` : " ✓"),
+        failed.length ? "error" : "success",
+      );
+    } finally {
+      setImpBusy(false);
+    }
   };
 
   const openAdd = () => { setEditId(null); setForm(emptyForm()); setFormErrors({}); setShowModal(true); };
@@ -154,6 +236,7 @@ export function SuppliersView({ api, section }: { api: SupplierApi; section: Sec
     <div>
       <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
         <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาชื่อ ผู้ติดต่อ เบอร์ อีเมล…" style={{ flex:"1 1 240px" }} />
+        <button onClick={() => setImpOpen(true)} style={{ whiteSpace: "nowrap" }}>นำเข้า Excel</button>
         <button className="primary" onClick={openAdd}>+ เพิ่มซัพพลายเออร์</button>
         {selected.size > 0 && (
           <button className="danger" onClick={() => setBulkConfirm(true)} disabled={saving}>
@@ -394,6 +477,128 @@ export function SuppliersView({ api, section }: { api: SupplierApi; section: Sec
               <button onClick={() => setBulkConfirm(false)}>ยกเลิก</button>
               <button className="danger" onClick={runBulkDelete} disabled={saving}>
                 {saving ? "กำลังลบ…" : `ลบ ${selected.size} ราย`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Excel import ──────────────────────────────────────────
+          Preview first, then apply. Two rules make this safe to run twice: a name that
+          already exists is never inserted again (so no duplicates for the stock updater
+          to pick between), and an existing row is only ever topped up where it is BLANK —
+          nothing saved is overwritten. */}
+      {impOpen && (
+        <div className="modal-overlay" onClick={closeImport}>
+          <div className="modal" style={{ maxWidth: 860 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ fontWeight: 500 }}>นำเข้าซัพพลายเออร์จาก Excel</div>
+              <button className="ghost" onClick={closeImport}>✕</button>
+            </div>
+
+            <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ fontSize: 14, color: "var(--text3)", lineHeight: 1.65 }}>
+                อ่านหัวคอลัมน์ตาม<b style={{ color: "var(--text2)" }}>ชื่อ</b> ไม่ใช่ตำแหน่ง — ใช้ไฟล์สต็อคที่มีคอลัมน์ซัพพลายเออร์อยู่แล้วได้เลย
+                (<span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>ชื่อบริษัทซัพ · ผู้ติดต่อ · เบอร์ติดต่อ · อีเมล · ที่อยู่ · จังหวัด · ประเทศ · รหัสไปรษณีย์ · ระยะเวลาส่ง(วัน) · เทอมจ่ายเงิน · เลขผู้เสียภาษี</span>)
+                <br />ต้องมีคอลัมน์ <b style={{ color: "var(--text2)" }}>ชื่อบริษัทซัพ</b> · ชื่อที่มีอยู่แล้วจะไม่ถูกเพิ่มซ้ำ และข้อมูลที่บันทึกไว้จะไม่ถูกเขียนทับ
+              </div>
+
+              <input type="file" accept=".xlsx,.xls,.csv"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) pickImportFile(f); }} />
+              {impName && (
+                <div style={{ fontSize: 13, color: "var(--text3)" }}>
+                  ไฟล์: <b style={{ color: "var(--text2)" }}>{impName}</b>
+                  {impRes && <> · พบ {impRes.rows.length} รายการ</>}
+                </div>
+              )}
+
+              {impErr && (
+                <div style={{ fontSize: 14, color: "var(--red)", background: "var(--bg3)",
+                  padding: "10px 14px", borderRadius: "var(--r)" }}>{impErr}</div>
+              )}
+
+              {impRes && (
+                <>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 13 }}>
+                    <span style={{ padding: "3px 10px", borderRadius: 999, background: "#dcfce7", color: "var(--green)" }}>
+                      ใหม่ {impCounts.new}
+                    </span>
+                    <span style={{ padding: "3px 10px", borderRadius: 999, background: "#fef3c7", color: "#b45309" }}>
+                      เติมข้อมูลที่ว่าง {impCounts.fillable}
+                    </span>
+                    <span style={{ padding: "3px 10px", borderRadius: 999, background: "var(--bg4)", color: "var(--text3)" }}>
+                      มีอยู่แล้ว {impCounts.existing}
+                    </span>
+                    {impCounts.duplicate > 0 && (
+                      <span style={{ padding: "3px 10px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9" }}>
+                        ชื่อซ้ำในไฟล์ {impCounts.duplicate}
+                      </span>
+                    )}
+                    {impRes.skipped > 0 && (
+                      <span style={{ color: "var(--text3)", alignSelf: "center" }}>ข้ามแถวที่ไม่มีชื่อ {impRes.skipped}</span>
+                    )}
+                  </div>
+
+                  {impRes.unknownHeaders.length > 0 && (
+                    <div style={{ fontSize: 13, color: "#b45309" }}>
+                      คอลัมน์ที่ไม่รู้จัก (ข้ามไป): {impRes.unknownHeaders.join(" · ")}
+                    </div>
+                  )}
+
+                  {impCounts.fillable > 0 && (
+                    <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
+                      <input type="checkbox" checked={impFill} onChange={(e) => setImpFill(e.target.checked)}
+                        style={{ width: "auto", marginTop: 3, cursor: "pointer" }} />
+                      <span>เติมข้อมูลที่ยังว่างของซัพพลายเออร์ที่มีอยู่แล้ว ({impCounts.fillable} ราย) — ค่าที่กรอกไว้แล้วไม่ถูกแก้</span>
+                    </label>
+                  )}
+
+                  <div style={{ maxHeight: 340, overflow: "auto", border: "1px solid var(--border)", borderRadius: "var(--r)" }}>
+                    <table style={{ fontSize: 14 }}>
+                      <thead className="sticky-head">
+                        <tr>
+                          <th style={{ whiteSpace: "nowrap" }}>สถานะ</th>
+                          <th style={{ whiteSpace: "nowrap" }}>ชื่อบริษัท</th>
+                          <th style={{ whiteSpace: "nowrap" }}>ผู้ติดต่อ</th>
+                          <th style={{ whiteSpace: "nowrap" }}>เบอร์ติดต่อ</th>
+                          <th style={{ whiteSpace: "nowrap" }}>จังหวัด</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {impPlan.map((p, i) => {
+                          const meta = p.plan === "new" ? { th: "ใหม่", bg: "#dcfce7", fg: "var(--green)" }
+                            : p.plan === "fillable" ? { th: `เติม ${Object.keys(p.fills).length} ช่อง`, bg: "#fef3c7", fg: "#b45309" }
+                            : p.plan === "duplicate" ? { th: "ซ้ำในไฟล์", bg: "#ede9fe", fg: "#6d28d9" }
+                            : { th: "มีอยู่แล้ว", bg: "var(--bg4)", fg: "var(--text3)" };
+                          const dim = p.plan === "existing" || p.plan === "duplicate";
+                          return (
+                            <tr key={i} style={{ opacity: dim ? 0.55 : 1 }}>
+                              <td>
+                                <span style={{ fontSize: 11, whiteSpace: "nowrap", padding: "2px 8px",
+                                  borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.th}</span>
+                              </td>
+                              <td style={{ fontWeight: 500, wordBreak: "break-word" }}>{p.row.supplier_name}</td>
+                              <td style={{ color: "var(--text2)" }}>{p.row.contact_person || "—"}</td>
+                              <td style={{ color: "var(--text2)", fontFamily: "var(--mono)", fontSize: 13 }}>{p.row.contact_number || "—"}</td>
+                              <td style={{ color: "var(--text2)" }}>{p.row.city || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button onClick={closeImport}>ยกเลิก</button>
+              <button className="primary" disabled={!impRes || impBusy || (impCounts.new === 0 && !(impFill && impCounts.fillable > 0))}
+                onClick={runImport}>
+                {impBusy ? "กำลังนำเข้า…"
+                  : impCounts.new > 0 || (impFill && impCounts.fillable > 0)
+                    ? `นำเข้า ${impCounts.new}${impFill && impCounts.fillable ? ` + เติม ${impCounts.fillable}` : ""} รายการ`
+                    : "ไม่มีรายการใหม่"}
               </button>
             </div>
           </div>
