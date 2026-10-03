@@ -25,7 +25,7 @@ import { useRouter } from "next/router";
 // AND Supabase Auth + RLS policies. Everything below is deliberately confined to
 // this file so that swap only touches one place.
 
-export type Role = "acc" | "fabric" | "audit" | "super";
+export type Role = "acc" | "fabric" | "audit" | "super" | "leads";
 export type Section = "acc" | "fabric";
 export type Area = "ops" | "admin";
 
@@ -56,6 +56,7 @@ export const ROLE_LABELS: Record<Role, { th: string; en: string }> = {
   fabric: { th: "แอดมินผ้า",     en: "Fabric admin" },
   audit:  { th: "ผู้ตรวจสอบ",     en: "Auditor" },
   super:  { th: "แอดมินสูงสุด",  en: "Super admin" },
+  leads:  { th: "แอดมินลีด",     en: "Leads admin" },
 };
 
 // Landing page after login. Section admins go straight to their own transactions
@@ -67,6 +68,7 @@ export const HOME_FOR: Record<Role, string> = {
   fabric: "/fabrics/transactions",
   audit: "/",
   super: "/",
+  leads: "/leads",   // a sales account has exactly one section, so skip the picker
 };
 
 export function readRole(): Role | null {
@@ -82,7 +84,7 @@ export function readRole(): Role | null {
   const r = sessionStorage.getItem(KEY_ROLE);
   // Version matches but the role is unreadable — treat as super rather than lock
   // someone out mid-session. (Can only happen if storage was hand-edited.)
-  if (r === "acc" || r === "fabric" || r === "audit" || r === "super") return r;
+  if (r === "acc" || r === "fabric" || r === "audit" || r === "super" || r === "leads") return r;
   return "super";
 }
 
@@ -95,6 +97,9 @@ export function isAuthed(): boolean {
 //   admin area       → super ONLY (manage / import / import-review / updater / log)
 //   ops + audit      → both sections (auditing spans the whole factory)
 //   ops + acc|fabric → own section only
+// NOTE on "leads": it is denied every stock area here without a special case — it
+// matches neither section, and the admin area is super-only. See canLeads() below
+// for the rule that actually lets it in anywhere.
 export function roleCan(role: Role | null, section: Section, area: Area): boolean {
   if (role === null) return false;
   if (role === "super") return true;
@@ -103,6 +108,14 @@ export function roleCan(role: Role | null, section: Section, area: Area): boolea
   return role === section;
 }
 
+
+// Leads (ลีดลูกค้า) sits OUTSIDE the section × area model: it is not a stock section and
+// has no ops/admin split, so it gets its own one-line rule rather than being bent into
+// roleCan(). Mirrored server-side by requireLeads() in lib/api-guard.ts — change both or
+// the page and its API disagree about who may read the board.
+export function canLeads(role: Role | null): boolean {
+  return role === "super" || role === "leads";
+}
 
 export function startSession(role: Role, uploadToken?: string | null): void {
   sessionStorage.setItem(KEY_AUTH, "1");

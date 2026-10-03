@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/router";
 import Link from "next/link";
 import { SearchInput } from "@/lib/search";
+import { readRole, canLeads } from "@/lib/auth";
+import { LoadError } from "@/lib/load-error";
 import { LeadDrawer } from "@/lib/lead-drawer";
 import { LeadSummary } from "@/lib/lead-summary";
 import {
@@ -14,9 +17,10 @@ import {
 // กระดานลีดลูกค้า — the sales pipeline board. Replaces a browser-local prototype + the
 // factory's Excel sheet with one shared, Supabase-backed board.
 //
-// UNGATED, and deliberately separate from the stock/order sections: leads are their own
-// standalone site area, reached by URL only (no card on the landing page). No readRole /
-// redirect here — anyone with the link gets the board.
+// SUPER-ONLY, and deliberately separate from the stock/order sections: leads are their own
+// standalone site area, reached by URL only (no card on the landing page). The gate matches
+// /costing; the REAL protection is row level security on customer_leads, which keeps the
+// table unreadable by the browser's public anon key (see lib/supabase-admin.ts).
 //
 // Two views over the same filtered set: a KANBAN board (drag a card to change its stage, which
 // writes an automatic log line) and a TABLE for scanning/exporting. Editing happens in a
@@ -38,8 +42,11 @@ function StatCard({ label, value, warn }: { label: string; value: number; warn?:
 }
 
 export default function LeadsPage() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const notify = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3000);
@@ -62,9 +69,23 @@ export default function LeadsPage() {
 
   const load = () => {
     setLoading(true);
-    getLeads().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
+    setErr(null);
+    getLeads().then(setRows)
+      .catch((e: any) => { setRows([]); setErr(e?.message ?? "โหลดข้อมูลไม่สำเร็จ"); })
+      .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  // Super or the dedicated `leads` sales account (canLeads). It is only half the story: `customer_leads` is
+  // closed to the browser's anon key by row level security (see lib/supabase-admin.ts), so
+  // the data is safe with or without this redirect. What the redirect adds is an honest
+  // answer — without it a stranger opening this URL now gets a silent empty board, because
+  // the API refuses them, which looks like a bug rather than a locked door.
+  useEffect(() => {
+    const r = readRole();
+    if (!r) { router.replace("/login"); return; }
+    if (!canLeads(r)) { router.replace("/"); return; }
+    setAuthed(true);
+  }, [router]);
+  useEffect(() => { if (authed) load(); }, [authed]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -202,11 +223,14 @@ export default function LeadsPage() {
     notify("ส่งออกแล้ว — เปิดใน Excel ได้เลย");
   };
 
+  if (authed !== true) return null;   // never flash the board while redirecting
+
   const openLead = rows.find((r) => r.id === openId) ?? null;
   const editLead = rows.find((r) => r.id === editId) ?? null;
 
   return (
     <div>
+      <LoadError msg={err} onRetry={load} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 500 }}>กระดานลีดลูกค้า</h1>

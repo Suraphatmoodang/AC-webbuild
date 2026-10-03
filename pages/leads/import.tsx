@@ -3,6 +3,8 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { parseLeadSheet, EXPECTED_HEADERS } from "@/lib/lead-sheet";
+import { readRole, canLeads } from "@/lib/auth";
+import { LoadError } from "@/lib/load-error";
 import { addLeadsBulk, getLeads, statusMeta, type LeadInput } from "@/lib/lead-store";
 
 // Import the factory's lead sheet (Customer_Lead_Tracking_Garment_Factory.xlsx).
@@ -12,23 +14,41 @@ import { addLeadsBulk, getLeads, statusMeta, type LeadInput } from "@/lib/lead-s
 
 export default function LeadImportPage() {
   const router = useRouter();
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<LeadInput[]>([]);
   const [fileName, setFileName] = useState("");
   const [saving, setSaving] = useState(false);
   const [existingCodes, setExistingCodes] = useState<Set<string>>(new Set());
+  const [err, setErr] = useState<string | null>(null);
   const [skipDup, setSkipDup] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3500);
   };
 
-  // Existing lead codes power the duplicate check in the preview.
-  // Ungated like /leads — see the note at the top of pages/leads/index.tsx.
+  // Super or the dedicated `leads` sales account (canLeads). It is only half the story: `customer_leads` is
+  // closed to the browser's anon key by row level security (see lib/supabase-admin.ts), so
+  // the data is safe with or without this redirect. What the redirect adds is an honest
+  // answer — without it a stranger opening this URL now gets a silent empty board, because
+  // the API refuses them, which looks like a bug rather than a locked door.
   useEffect(() => {
+    const r = readRole();
+    if (!r) { router.replace("/login"); return; }
+    if (!canLeads(r)) { router.replace("/"); return; }
+    setAuthed(true);
+  }, [router]);
+
+  // Existing lead codes power the duplicate check in the preview.
+  useEffect(() => {
+    if (!authed) return;
     getLeads()
       .then((ls) => setExistingCodes(new Set(ls.map((l) => l.lead_code.trim()).filter(Boolean))))
-      .catch(() => setExistingCodes(new Set()));
-  }, []);
+      .catch((e: any) => {
+        // Non-fatal: the import still works, it just cannot flag duplicates.
+        setExistingCodes(new Set());
+        setErr((e?.message ?? "โหลดรหัสลีดเดิมไม่สำเร็จ") + " — ยังนำเข้าได้ แต่จะไม่เตือนรหัสซ้ำ");
+      });
+  }, [authed]);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -75,8 +95,11 @@ export default function LeadImportPage() {
     }
   };
 
+  if (authed !== true) return null;   // never flash the importer while redirecting
+
   return (
     <div>
+      <LoadError msg={err} />
       <div style={{ marginBottom: 16 }}>
         <Link href="/leads" style={{ fontSize: 14, color: "var(--text3)" }}>← กลับไปกระดาน</Link>
         <h1 style={{ fontSize: 22, fontWeight: 500, marginTop: 4 }}>นำเข้าลูกค้าจาก Excel</h1>

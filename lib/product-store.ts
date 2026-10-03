@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { apiCall } from "./api-call";
 
 // Product catalog (สินค้า) — a reusable master list of garment definitions following
 // the "add product" Excel spec. An order (product_costings) references a product via
@@ -68,40 +68,19 @@ export function emptyProductInput(): ProductInput {
 }
 
 export async function getProducts(activeOnly = false): Promise<Product[]> {
-  const all: Product[] = [];
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    let q = supabase.from("products").select("*").order("style_no").order("product_type").order("id").range(from, from + PAGE - 1);   // unique tiebreaker → gap-free pagination
-    if (activeOnly) q = q.eq("is_active", true);
-    const { data, error } = await q;
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    all.push(...(data as Product[]));
-    if (data.length < PAGE) break;
-  }
-  return all;
+  return apiCall<Product[]>("products", "list", { activeOnly });
 }
 
 export async function addProduct(input: ProductInput): Promise<Product> {
-  const { data, error } = await supabase.from("products").insert(input).select().single();
-  if (error) throw error;
-  return data as Product;
+  return apiCall<Product>("products", "add", { input });
 }
 
 export async function updateProduct(id: string, input: Partial<ProductInput>): Promise<Product> {
-  const { data, error } = await supabase
-    .from("products")
-    .update({ ...input, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Product;
+  return apiCall<Product>("products", "update", { id, input });
 }
 
 export async function deleteProduct(id: string): Promise<void> {
-  const { error } = await supabase.from("products").delete().eq("id", id);
-  if (error) throw error;
+  await apiCall<null>("products", "delete", { id });
 }
 
 // A short human label for a product, for dropdowns and lists.

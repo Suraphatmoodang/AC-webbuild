@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import { readRole, type Role } from "@/lib/auth";
+import { LoadError } from "@/lib/load-error";
 import {
   getCostings, deleteCosting, computeCosting, hasCosting, statusMeta, ORDER_STATUSES,
   showsActualCosting, normalizeActualCosting, actualCostTotal, type ProductCosting,
@@ -39,6 +40,7 @@ export default function CostingList() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<ProductCosting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -58,9 +60,10 @@ export default function CostingList() {
 
   const load = () => {
     setLoading(true);
+    setErr(null);
     getCostings()
       .then(setRows)
-      .catch(() => setRows([]))
+      .catch((e: any) => { setRows([]); setErr(e?.message ?? "โหลดข้อมูลไม่สำเร็จ"); })
       .finally(() => setLoading(false));
   };
   useEffect(() => { if (authed) load(); }, [authed]);
@@ -173,6 +176,7 @@ export default function CostingList() {
 
   return (
     <div>
+      <LoadError msg={err} onRetry={load} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 500 }}>ออเดอร์</h1>

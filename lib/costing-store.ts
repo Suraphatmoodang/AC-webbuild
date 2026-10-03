@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { apiCall } from "./api-call";
 import { getAccessories, getLotMap } from "./store";
 import { getFabrics, getFabricLotMap } from "./fabric-store";
 import type { StoredImage } from "./images";
@@ -494,105 +495,40 @@ export function hasCosting(c: {
 // ── CRUD ─────────────────────────────────────────────────────────────
 
 export async function getCostings(): Promise<ProductCosting[]> {
-  const all: ProductCosting[] = [];
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("product_costings")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    all.push(...(data as ProductCosting[]));
-    if (data.length < PAGE) break;
-  }
-  return all;
+  return apiCall<ProductCosting[]>("costings", "list");
 }
 
 export async function getCosting(id: string): Promise<ProductCosting | null> {
-  const { data, error } = await supabase.from("product_costings").select("*").eq("id", id).single();
-  if (error) return null;
-  return data as ProductCosting;
+  return apiCall<ProductCosting | null>("costings", "get", { id });
 }
 
-// ── Pre-migration resilience ─────────────────────────────────────────
-// `product_costings` has grown columns over time (actual_entries, images, actual_costing) and
-// the ALTERs are applied BY HAND in Supabase (there is no sql/ folder — see CLAUDE.md). Without
-// this, every save on the page breaks the moment code ships ahead of the migration. So: when
-// Postgres rejects a write for an unknown column (42703), drop that field from the payload and
-// retry. The order still saves; only the not-yet-migrated field is lost — which is exactly what
-// the code promises elsewhere ("actuals unsaved until applied"). Bounded so it can't spin.
-// The same failure reaches us worded two different ways, so match BOTH:
-//   · PostgREST (what supabase-js normally surfaces, PGRST204):
-//       Could not find the 'actual_costing' column of 'product_costings' in the schema cache
-//   · Postgres itself (42703, e.g. once the schema cache has refreshed):
-//       column "actual_costing" of relation "product_costings" does not exist
-function missingColumn(error: any): string | null {
-  const msg = String(error?.message ?? "");
-  const m = /could not find the '([^']+)' column/i.exec(msg)
-    ?? /column "([^"]+)" of relation ".*" does not exist/i.exec(msg);
-  return m ? m[1] : null;
-}
-
-async function writeCosting<T extends Record<string, any>>(
-  payload: T,
-  // PromiseLike, not Promise: a Supabase query builder is thenable but isn't a real Promise.
-  run: (p: T) => PromiseLike<{ data: any; error: any }>,
-): Promise<ProductCosting> {
-  let body = payload;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const { data, error } = await run(body);
-    if (!error) return data as ProductCosting;
-    const col = missingColumn(error);
-    if (!col || !(col in body)) throw error;
-    console.warn(`product_costings.${col} ยังไม่มีในฐานข้อมูล — บันทึกโดยข้ามคอลัมน์นี้ (ต้อง ALTER TABLE ก่อน)`);
-    const { [col]: _drop, ...rest } = body as any;
-    body = rest as T;
-  }
-  throw new Error("บันทึกไม่สำเร็จ");
-}
+// NOTE: the pre-migration "unknown column → drop it and retry" safety net that used to
+// live here moved to pages/api/data/costings.ts, where the write now happens. Adding a
+// new product_costings column is still safe before its ALTER is applied.
 
 export async function addCosting(input: CostingInput): Promise<ProductCosting> {
-  return writeCosting(input as Record<string, any>, (p) =>
-    supabase.from("product_costings").insert(p).select().single());
+  return apiCall<ProductCosting>("costings", "add", { input });
 }
 
-// Bulk-insert orders (used by the Excel importer). Chunked to stay under request limits.
+// Bulk-insert orders (used by the Excel importer). Chunked server-side to stay under request limits.
 export async function addCostingsBulk(inputs: CostingInput[]): Promise<number> {
   if (inputs.length === 0) return 0;
-  const CHUNK = 500;
-  let inserted = 0;
-  for (let i = 0; i < inputs.length; i += CHUNK) {
-    const slice = inputs.slice(i, i + CHUNK);
-    const { error } = await supabase.from("product_costings").insert(slice);
-    if (error) throw error;
-    inserted += slice.length;
-  }
-  return inserted;
+  return apiCall<number>("costings", "addBulk", { inputs });
 }
 
 export async function updateCosting(id: string, input: Partial<CostingInput>): Promise<ProductCosting> {
-  return writeCosting({ ...input, updated_at: new Date().toISOString() } as Record<string, any>, (p) =>
-    supabase.from("product_costings").update(p).eq("id", id).select().single());
+  return apiCall<ProductCosting>("costings", "update", { id, input });
 }
 
 // Save the order's JSONB list of R2 image keys. Kept separate from updateCosting so a
 // photo added mid-edit is persisted on its own and never overwritten by a form save.
 // Requires: alter table product_costings add column if not exists images jsonb not null default '[]';
 export async function setCostingImages(id: string, images: StoredImage[]): Promise<void> {
-  const { error } = await supabase.from("product_costings").update({ images }).eq("id", id);
-  if (error) {
-    throw new Error(/images/i.test(error.message)
-      ? "ยังไม่ได้เพิ่มคอลัมน์ images ในฐานข้อมูล — ติดต่อผู้ดูแลระบบ"
-      : error.message);
-  }
+  await apiCall<null>("costings", "setImages", { id, images });
 }
 
 export async function deleteCosting(id: string): Promise<void> {
-  const { error } = await supabase.from("product_costings").delete().eq("id", id);
-  if (error) throw error;
+  await apiCall<null>("costings", "delete", { id });
 }
 
 // ── Live price sources ───────────────────────────────────────────────
@@ -662,11 +598,7 @@ export type OrderRef = {
 };
 
 export async function getActiveOrders(): Promise<OrderRef[]> {
-  const { data, error } = await supabase
-    .from("product_costings")
-    .select("id, code, customer, style_no, po_no, description, status, due_date")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
+  const data = await apiCall<any[]>("costings", "activeOrders");
   return (data ?? [])
     .filter((o: any) => o.status !== "done" && o.status !== "cancelled")
     .map((o: any) => ({

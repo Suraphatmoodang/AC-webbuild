@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { apiCall } from "./api-call";
 
 // Customer leads (ลีดลูกค้า) — a FOURTH standalone section beside อุปกรณ์ / ผ้า / ต้นทุน.
 // It is a sales pipeline, not inventory: one row per inbound enquiry (Facebook / Instagram /
@@ -221,21 +221,8 @@ export function duplicateSummary(dups: LeadDup<{ lead_code: string; status: stri
 // Stores throw; pages catch and notify (the convention across this app).
 
 export async function getLeads(): Promise<Lead[]> {
-  const all: Lead[] = [];
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("customer_leads")
-      .select("*")
-      .order("received_date", { ascending: false })
-      .order("id", { ascending: false })   // unique tiebreaker → gap-free pagination
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    all.push(...(data as Lead[]).map(normalize));
-    if (data.length < PAGE) break;
-  }
-  return all;
+  const rows = await apiCall<any[]>("leads", "list");
+  return rows.map(normalize);
 }
 
 // `log` is JSONB — guard against null/garbage so the UI can always map over it.
@@ -245,42 +232,23 @@ function normalize(row: any): Lead {
 }
 
 export async function getLead(id: string): Promise<Lead | null> {
-  const { data, error } = await supabase.from("customer_leads").select("*").eq("id", id).single();
-  if (error) return null;
-  return normalize(data);
+  const row = await apiCall<any | null>("leads", "get", { id });
+  return row ? normalize(row) : null;
 }
 
 export async function addLead(input: LeadInput): Promise<Lead> {
-  const { data, error } = await supabase.from("customer_leads").insert(input).select().single();
-  if (error) throw error;
-  return normalize(data);
+  return normalize(await apiCall<any>("leads", "add", { input }));
 }
 
 export async function addLeadsBulk(inputs: LeadInput[]): Promise<number> {
   if (inputs.length === 0) return 0;
-  const CHUNK = 500;
-  let inserted = 0;
-  for (let i = 0; i < inputs.length; i += CHUNK) {
-    const slice = inputs.slice(i, i + CHUNK);
-    const { error } = await supabase.from("customer_leads").insert(slice);
-    if (error) throw error;
-    inserted += slice.length;
-  }
-  return inserted;
+  return apiCall<number>("leads", "addBulk", { inputs });
 }
 
 export async function updateLead(id: string, input: Partial<LeadInput>): Promise<Lead> {
-  const { data, error } = await supabase
-    .from("customer_leads")
-    .update({ ...input, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return normalize(data);
+  return normalize(await apiCall<any>("leads", "update", { id, input }));
 }
 
 export async function deleteLead(id: string): Promise<void> {
-  const { error } = await supabase.from("customer_leads").delete().eq("id", id);
-  if (error) throw error;
+  await apiCall<null>("leads", "delete", { id });
 }

@@ -26,6 +26,7 @@ const ACCOUNTS: { role: Role; user?: string; pass?: string }[] = [
   { role: "acc",    user: process.env.ACC_ADMIN_USERNAME,    pass: process.env.ACC_ADMIN_PASSWORD },
   { role: "fabric", user: process.env.FABRIC_ADMIN_USERNAME, pass: process.env.FABRIC_ADMIN_PASSWORD },
   { role: "audit",  user: process.env.AUDIT_USERNAME,        pass: process.env.AUDIT_PASSWORD },
+  { role: "leads",  user: process.env.LEADS_ADMIN_USERNAME,  pass: process.env.LEADS_ADMIN_PASSWORD },
 ];
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {

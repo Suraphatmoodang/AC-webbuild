@@ -9,6 +9,7 @@ import { parseFabricSheet, resolveFabricColumns, type FabricSheetRow } from "@/l
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
 import { OwnerTag } from "@/lib/owner-tag";
+import { downloadUpdateLog, logValue, type ChangeRecord } from "@/lib/update-log";
 
 // Columns the user can choose to update (the "mode"). `sheetKey` is the parsed-row
 // field that must be present in the file for the column to be selectable.
@@ -78,9 +79,12 @@ export default function FabricStockUpdatePage() {
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<null | { updated: number; failed: number }>(null);
+  // Before/after for the run just applied, captured at apply time — the rows are dropped
+  // from the list afterwards, so this is the only remaining record of what changed.
+  const [runLog, setRunLog] = useState<{ meta: any; records: ChangeRecord[] } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireAccess("fabric", "admin");
+  const { authed, role } = useRequireAccess("fabric", "admin");
 
   useEffect(() => { if (authed) { getSuppliers().then(setSuppliers); } }, [authed]);
 
@@ -229,6 +233,11 @@ export default function FabricStockUpdatePage() {
   };
   // Every selectable row across ALL pages (respects the current filter/search).
   const selectableAll = visible.filter(({ r }) => isSelectable(r)).map(({ i }) => i);
+  // ...and the same count IGNORING the filter/search. The two differ whenever a search term
+  // or status chip is narrowing the list, and the "select all" button then silently offers a
+  // subset — which reads as success while most rows go un-applied. So the button shows both.
+  const selectableTotal = rows.filter((r) => isSelectable(r)).length;
+  const filterHidesRows = selectableTotal > selectableAll.length;
   const selectAllMatched = () => setSelected(new Set(selectableAll));
   const toggleRow = (i: number) => {
     const next = new Set(selected);
@@ -276,9 +285,47 @@ export default function FabricStockUpdatePage() {
         sheet_has_price: sheetCols.has("unit_cost"),
       }));
 
+      // Snapshot before/after per FIELD, from the matched row (current DB value) against the
+      // sheet row. Taken before the write so a failure still shows what was attempted.
+      const pending: ChangeRecord[] = [];
+      for (const r of chosen) {
+        const a = r._matched; if (!a) continue;
+        const ref = [String(a.row_label ?? "").trim(), String(a.fabric_code ?? "").trim()].filter(Boolean).join("|") || "—";
+        const name = [a.fabric_type, a.color, a.width].map((x) => String(x ?? "").trim()).filter(Boolean).join(" · ");
+        const push = (field: string, before: any, after: any) => {
+          if (logValue(before) === logValue(after)) return;   // only real changes
+          pending.push({ ref, name, field, before: logValue(before), after: logValue(after), id: a.id, ok: true });
+        };
+        for (const f of fields) {
+          const col = UPDATE_COLUMNS.find((c) => c.field === f);
+          if (!col) continue;
+          if (f === "supplier") {
+            const sid = supplierIdFor(r.supplier_name);
+            if (sid == null) continue;                        // not written, so not logged
+            const was = suppliers.find((s) => s.id === a.supplier_id)?.supplier_name ?? "";
+            push(col.label, was, suppliers.find((s) => s.id === sid)?.supplier_name ?? r.supplier_name);
+          } else if (f === "quantity") {
+            push(col.label, a.quantity, r.quantity);
+          } else {
+            push(col.label, (a as any)[f], (r as any)[f]);
+          }
+        }
+      }
+
       const { updated, errors } = await applyFabricUpdates(updates, fields, (d, t) => setProgress({ done: d, total: t }));
       setConfirm(false);
       setResult({ updated, failed: errors.length });
+      // Mark the rows whose write failed, so the log never claims a change that didn't land.
+      const failedIds = new Set(errors.map((e) => e.split(":")[0].trim()));
+      setRunLog({
+        meta: {
+          section: "ผ้า", fileName,
+          matchMode: matchMode === "exact" ? "ตรงกันเป๊ะจาก id" : "ค้นหาและจับคู่",
+          columns: fields.map((f) => UPDATE_COLUMNS.find((c) => c.field === f)?.label ?? f),
+          rowsApplied: updated, rowsFailed: errors.length, by: role ?? "",
+        },
+        records: pending.map((p) => ({ ...p, ok: !failedIds.has(p.id) })),
+      });
       // Remove applied rows from the list (by their index in baseRows)
       const applied = new Set(chosenIdx);
       setBaseRows((prev) => prev.filter((_, i) => !applied.has(i)));
@@ -435,7 +482,10 @@ export default function FabricStockUpdatePage() {
             <option value={100000}>ทั้งหมด</option>
           </select>
           {selectableAll.length > 0 && (
-            <button onClick={selectAllMatched}>เลือกทั้งหมดที่ตรงกัน ({selectableAll.length})</button>
+            <button onClick={selectAllMatched}
+              title={filterHidesRows ? `ตัวกรอง/คำค้นหาซ่อนอยู่ ${selectableTotal - selectableAll.length} รายการ — ล้างคำค้นหาเพื่อเลือกทั้ง ${selectableTotal}` : ""}>
+              เลือกทั้งหมดที่ตรงกัน ({selectableAll.length}{filterHidesRows ? ` จาก ${selectableTotal}` : ""})
+            </button>
           )}
           {selected.size > 0 && (
             <button onClick={() => setSelected(new Set())}>ล้างการเลือก</button>
@@ -581,6 +631,19 @@ export default function FabricStockUpdatePage() {
                 </div>
               )}
             </div>
+            {/* The run's receipt. Nothing is stored server-side, so this download is the only
+                record of what changed — offered before the ปิด button for that reason. */}
+            {runLog && runLog.records.length > 0 && (
+              <div style={{ padding: "0 20px 4px" }}>
+                <button onClick={() => downloadUpdateLog(runLog.meta, runLog.records)}
+                  style={{ width: "100%", padding: "10px 14px", fontSize: 14 }}>
+                  ⬇ ดาวน์โหลดบันทึกการเปลี่ยนแปลง ({runLog.records.filter((r) => r.ok).length} ช่อง)
+                </button>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, lineHeight: 1.55 }}>
+                  ค่าเดิม → ค่าใหม่ ของทุกช่องที่เปลี่ยน · ระบบไม่ได้เก็บบันทึกนี้ไว้ ถ้าต้องการเก็บต้องดาวน์โหลดตอนนี้
+                </div>
+              </div>
+            )}
             <div className="modal-footer">
               <button onClick={() => setResult(null)}>ปิด</button>
               <button className="primary" onClick={() => router.push("/fabrics")}>ไปที่หน้าสต็อคผ้า</button>

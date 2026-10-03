@@ -7,6 +7,7 @@ import { buildAccessoryMatchIndex, matchKeyForRow, applyStockUpdates, getSupplie
 import { useRequireAccess } from "@/lib/auth";
 import { usePagination, PaginationBar } from "@/lib/pagination";
 import { SearchInput } from "@/lib/search";
+import { downloadUpdateLog, logValue, type ChangeRecord } from "@/lib/update-log";
 
 // Header-name → field mapping (same sheet layout as the importer)
 const HEADER_MAP: Record<string, string[]> = {
@@ -88,9 +89,12 @@ export default function StockUpdatePage() {
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<null | { updated: number; failed: number }>(null);
+  // Before/after for the run just applied — the rows leave the list afterwards, so this is
+  // the only remaining record of what changed. Mirrors the fabric updater.
+  const [runLog, setRunLog] = useState<{ meta: any; records: ChangeRecord[] } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const { authed } = useRequireAccess("acc", "admin");
+  const { authed, role } = useRequireAccess("acc", "admin");
 
   useEffect(() => { if (authed) getSuppliers().then(setSuppliers); }, [authed]);
 
@@ -269,9 +273,44 @@ export default function StockUpdatePage() {
         sheet_has_price: sheetCols.has("unit_cost"),
       }));
 
+      // Snapshot before/after per FIELD from the matched item against the sheet row, taken
+      // before the write so a failed row still shows what was attempted.
+      const pending: ChangeRecord[] = [];
+      for (const r of chosen) {
+        const a = r._matched; if (!a) continue;
+        const ref = String(a.acc_code ?? "").trim() || "—";
+        const name = [a.type, a.description, a.color, a.size].map((x) => String(x ?? "").trim()).filter(Boolean).join(" · ");
+        const push = (field: string, before: any, after: any) => {
+          if (logValue(before) === logValue(after)) return;
+          pending.push({ ref, name, field, before: logValue(before), after: logValue(after), id: a.id, ok: true });
+        };
+        for (const f of fields) {
+          const col = UPDATE_COLUMNS.find((c) => c.field === f);
+          if (!col) continue;
+          if (f === "supplier") {
+            const sid = supplierIdFor(r.supplier_name);
+            if (sid == null) continue;                        // not written, so not logged
+            const was = suppliers.find((s) => s.id === a.supplier_id)?.supplier_name ?? "";
+            push(col.label, was, suppliers.find((s) => s.id === sid)?.supplier_name ?? r.supplier_name);
+          } else {
+            push(col.label, (a as any)[f], (r as any)[f]);
+          }
+        }
+      }
+
       const { updated, errors } = await applyStockUpdates(updates, fields, (d, t) => setProgress({ done: d, total: t }));
       setConfirm(false);
       setResult({ updated, failed: errors.length });
+      const failedIds = new Set(errors.map((e) => e.split(":")[0].trim()));
+      setRunLog({
+        meta: {
+          section: "อุปกรณ์", fileName,
+          matchMode: matchMode === "exact" ? "ตรงกันเป๊ะจาก id" : "ค้นหาและจับคู่",
+          columns: fields.map((f) => UPDATE_COLUMNS.find((c) => c.field === f)?.label ?? f),
+          rowsApplied: updated, rowsFailed: errors.length, by: role ?? "",
+        },
+        records: pending.map((p) => ({ ...p, ok: !failedIds.has(p.id) })),
+      });
       // Remove applied rows from the list (by their index in baseRows)
       const applied = new Set(chosenIdx);
       setBaseRows((prev) => prev.filter((_, i) => !applied.has(i)));
@@ -548,6 +587,19 @@ export default function StockUpdatePage() {
                 </div>
               )}
             </div>
+            {/* The run's receipt. Nothing is stored server-side, so this download is the only
+                record of what changed — offered before the ปิด button for that reason. */}
+            {runLog && runLog.records.length > 0 && (
+              <div style={{ padding: "0 20px 4px" }}>
+                <button onClick={() => downloadUpdateLog(runLog.meta, runLog.records)}
+                  style={{ width: "100%", padding: "10px 14px", fontSize: 14 }}>
+                  ⬇ ดาวน์โหลดบันทึกการเปลี่ยนแปลง ({runLog.records.filter((r) => r.ok).length} ช่อง)
+                </button>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, lineHeight: 1.55 }}>
+                  ค่าเดิม → ค่าใหม่ ของทุกช่องที่เปลี่ยน · ระบบไม่ได้เก็บบันทึกนี้ไว้ ถ้าต้องการเก็บต้องดาวน์โหลดตอนนี้
+                </div>
+              </div>
+            )}
             <div className="modal-footer">
               <button onClick={() => setResult(null)}>ปิด</button>
               <button className="primary" onClick={() => router.push("/stock")}>ไปที่หน้าสต็อค</button>

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import Link from "next/link";
+import { readRole, canLeads } from "@/lib/auth";
+import { LoadError } from "@/lib/load-error";
 import {
   getLeads, LEAD_STATUSES, LEAD_CHANNELS, LOST_REASONS,
   isClosed, isDue, type Lead,
@@ -140,16 +143,33 @@ const MONTHS_SHOWN = 12;
 const STAGES = LEAD_STATUSES.filter((st) => st.key !== "lost");
 
 export default function LeadTrends() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   // Starts on แบบใหม่; a saved choice is read after mount so the server-rendered markup matches.
   const [chart, setChart] = useState<"new" | "classic">("new");
 
+  // Super or the dedicated `leads` sales account (canLeads). It is only half the story: `customer_leads` is
+  // closed to the browser's anon key by row level security (see lib/supabase-admin.ts), so
+  // the data is safe with or without this redirect. What the redirect adds is an honest
+  // answer — without it a stranger opening this URL now gets a silent empty board, because
+  // the API refuses them, which looks like a bug rather than a locked door.
   useEffect(() => {
-    getLeads().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
+    const r = readRole();
+    if (!r) { router.replace("/login"); return; }
+    if (!canLeads(r)) { router.replace("/"); return; }
+    setAuthed(true);
+  }, [router]);
+  useEffect(() => {
+    if (!authed) return;
+    getLeads().then(setRows)
+      .catch((e: any) => { setRows([]); setErr(e?.message ?? "โหลดข้อมูลไม่สำเร็จ"); })
+      .finally(() => setLoading(false));
     const saved = localStorage.getItem("leadTrendsChart");
     if (saved === "classic" || saved === "new") setChart(saved);
-  }, []);
+  }, [authed]);
 
   const pickChart = (v: "new" | "classic") => {
     setChart(v);
@@ -210,6 +230,8 @@ export default function LeadTrends() {
     return { all, won, lost, open, due, closed, months, funnel, byStatus, channels, products, lostReasons };
   }, [rows]);
 
+  if (authed !== true) return null;   // never flash the charts while redirecting
+
   const maxMonth = Math.max(1, ...s.months.map((m) => m.count));
   const maxFunnel = Math.max(1, ...s.funnel.map((f) => f.reached));
   const maxStatus = Math.max(1, ...s.byStatus.map((f) => f.count));
@@ -219,6 +241,7 @@ export default function LeadTrends() {
 
   return (
     <div>
+      <LoadError msg={err} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 500 }}>แนวโน้มลีดลูกค้า</h1>

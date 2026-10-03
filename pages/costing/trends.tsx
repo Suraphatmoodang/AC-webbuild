@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import { readRole } from "@/lib/auth";
 import { getCostings, computeCosting, hasCosting, statusMeta, ORDER_STATUSES, type ProductCosting } from "@/lib/costing-store";
+import { LoadError } from "@/lib/load-error";
 
 const fmt0 = (v: number) => (isFinite(v) ? v : 0).toLocaleString("th-TH", { maximumFractionDigits: 0 });
 
@@ -55,9 +56,13 @@ export default function CostingTrends() {
     setAuthed(true);
   }, [router]);
 
+  const [err, setErr] = useState<string | null>(null);
+
   useEffect(() => {
     if (!authed) return;
-    getCostings().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
+    getCostings().then(setRows)
+      .catch((e: any) => { setRows([]); setErr(e?.message ?? "โหลดข้อมูลไม่สำเร็จ"); })
+      .finally(() => setLoading(false));
   }, [authed]);
 
   const data = useMemo(() => {
@@ -132,6 +137,7 @@ export default function CostingTrends() {
 
   return (
     <div>
+      <LoadError msg={err} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <Link href="/costing" style={{ fontSize: 14, color: "var(--text3)" }}>← กลับไปรายการ</Link>

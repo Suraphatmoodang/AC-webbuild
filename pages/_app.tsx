@@ -59,8 +59,8 @@ const NAV_COSTING: NavItem[] = [
 ];
 
 // Leads (ลีดลูกค้า) is a fourth standalone section — a sales pipeline, not inventory.
-// Like costing it has no ops/admin split: the pages gate themselves (super-only), so
-// these items carry no `area`.
+// Like costing it has no ops/admin split: the pages gate themselves (canLeads — super or
+// the dedicated sales account), so these items carry no `area`.
 const NAV_LEADS: NavItem[] = [
   { href: "/leads", label: "กระดาน", en: "Board" },
   { href: "/leads/trends", label: "แนวโน้ม", en: "Trends" },
@@ -137,7 +137,8 @@ export default function App({ Component, pageProps }: AppProps) {
             <span style={{ fontSize: 20, color: "var(--text3)", letterSpacing: "0.04em" }}>{title.word}</span>
           </Link>
           {/* Back to the section picker — only meaningful once inside a section, and NOT from
-              leads: that section is standalone (no card on the landing page, no auth gate), so
+              leads: that section is standalone (no card on the landing page), and a sales
+              account has nowhere else to go, so
               a ⇄ out of it is only ever an accidental press into the stock/order app. */}
           {section !== "none" && section !== "leads" && (
             <Link href="/" title="เลือกระบบ" aria-label="เลือกระบบ"

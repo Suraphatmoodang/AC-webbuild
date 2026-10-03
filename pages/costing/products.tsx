@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import { readRole, type Role } from "@/lib/auth";
 import { getProducts, addProduct, updateProduct, deleteProduct, emptyProductInput, productLabel, type Product, type ProductInput } from "@/lib/product-store";
+import { LoadError } from "@/lib/load-error";
 import { PRODUCT_OPT, buildComboOptions } from "@/lib/product-spec";
 import { Combo } from "@/lib/combo";
 import { usePagination, PaginationBar } from "@/lib/pagination";
@@ -47,9 +48,14 @@ export default function ProductsPage() {
     setAuthed(true);
   }, [router]);
 
+  const [err, setErr] = useState<string | null>(null);
+
   const load = () => {
     setLoading(true);
-    getProducts().then(setRows).catch(() => setRows([])).finally(() => setLoading(false));
+    setErr(null);
+    getProducts().then(setRows)
+      .catch((e: any) => { setRows([]); setErr(e?.message ?? "โหลดข้อมูลไม่สำเร็จ"); })
+      .finally(() => setLoading(false));
   };
   useEffect(() => { if (authed) load(); }, [authed]);
 
@@ -110,6 +116,7 @@ export default function ProductsPage() {
 
   return (
     <div className="costing-page">
+      <LoadError msg={err} onRetry={load} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <Link href="/costing" style={{ fontSize: 14, color: "var(--text3)" }}>← กลับไปออเดอร์</Link>
