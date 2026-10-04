@@ -7,7 +7,7 @@ import { useSession, endSession, roleCan, ROLE_LABELS, type Section } from "@/li
 // import { getLeads, isDue } from "@/lib/lead-store";   // only for the hidden leads card (see below)
 
 // Section picker. The two stock systems (อุปกรณ์ / ผ้า) are fully independent —
-// separate tables, separate pages, separate logs — and share only Suppliers.
+// separate tables, separate pages, separate logs, separate suppliers.
 // This page is the only place they meet, so it also shows a live count/value of
 // each so you can see at a glance which side you're heading into.
 
@@ -298,7 +298,7 @@ export default function HomePage() {
       */}
 
       <div style={{ textAlign: "center", marginTop: 28, fontSize: 14, color: "var(--text3)" }}>
-        ซัพพลายเออร์ใช้ฐานข้อมูลเดียวกันทั้งสองระบบ · Suppliers are shared between both systems
+        ซัพพลายเออร์แยกกันในแต่ละระบบ · Each system keeps its own suppliers
       </div>
     </div>
   );
