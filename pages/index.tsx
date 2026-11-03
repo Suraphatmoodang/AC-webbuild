@@ -3,8 +3,8 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import { getAccessoryValueRows, getLotValueMap, valueFromLots as accValue } from "@/lib/store";
 import { getFabricValueRows, getFabricLotValueMap, valueFromLots as fabValue, SELF_OWNER } from "@/lib/fabric-store";
-import { useSession, endSession, roleCan, ROLE_LABELS, type Section } from "@/lib/auth";
-// import { getLeads, isDue } from "@/lib/lead-store";   // only for the hidden leads card (see below)
+import { useSession, endSession, roleCan, canLeads, ROLE_LABELS, type Section } from "@/lib/auth";
+// import { getLeads, isDue } from "@/lib/lead-store";   // only for the (disabled) leads-card counts
 
 // Section picker. The two stock systems (อุปกรณ์ / ผ้า) are fully independent —
 // separate tables, separate pages, separate logs, separate suppliers.
@@ -51,7 +51,7 @@ export default function HomePage() {
   const { role } = useSession();
   const [acc, setAcc] = useState<Stat>(null);
   const [fab, setFab] = useState<Stat>(null);
-  // Lead counts — only for the hidden leads card (see below).
+  // Lead counts for the leads card — disabled, the card is a plain link (see below).
   // const [leads, setLeads] = useState<{ all: number; due: number } | null>(null);
   // Per-card "show all" toggle, keyed by section href (both cards now have a breakdown list).
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -110,8 +110,8 @@ export default function HomePage() {
       .catch(() => setFab({ items: 0, value: 0 }));
   }, []);
 
-  // Lead counts are not loaded — the leads card is hidden from this page (see below), so
-  // there is nothing to count for. Restore this alongside the card if it ever comes back.
+  // Lead counts are not loaded — the leads card is a plain link. Restore this (and a counts
+  // row on the card) if the card should show ทั้งหมด / ต้องติดตาม again.
   // useEffect(() => {
   //   getLeads()
   //     .then((ls) => setLeads({ all: ls.length, due: ls.filter(isDue).length }))
@@ -264,11 +264,9 @@ export default function HomePage() {
         </Link>
       )}
 
-      {/* Leads (ลีดลูกค้า) is HIDDEN from the landing page on purpose — it's a standalone
-          area unrelated to stock/orders, reached by URL (/leads) only. The page is also
-          ungated now, so there is no role check left to key this card off. Kept here (not
-          deleted) so it can be restored if leads ever joins the section picker.
-      {role === "super" && (
+      {/* Leads (ลีดลูกค้า) — a standalone sales area, so its card only shows to the roles
+          that can open it (super + the leads account; same rule as the /leads page gate). */}
+      {canLeads(role) && (
         <Link href="/leads" className="card home-card"
           style={{ display: "block", padding: 20, marginTop: 16, transition: "border-color 0.15s, transform 0.15s" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
@@ -276,26 +274,13 @@ export default function HomePage() {
               <div style={{ fontSize: 21, fontWeight: 500 }}>ลีดลูกค้า</div>
               <div style={{ fontSize: 15, color: "var(--text3)", letterSpacing: "0.04em" }}>Leads · follow-up · pipeline</div>
             </div>
-            <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap" }}>แอดมินสูงสุด</span>
+            <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap" }}>{role && ROLE_LABELS[role].th}</span>
           </div>
           <div style={{ fontSize: 14, color: "var(--text2)", marginTop: 8 }}>
             ติดตามลูกค้าที่ติดต่อเข้ามาจาก Facebook / LINE / TikTok ตั้งแต่รับเรื่องจนปิดการขาย
           </div>
-          {leads && (
-            <div style={{ display: "flex", gap: 18, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: 14 }}>
-              <span style={{ color: "var(--text3)" }}>
-                ทั้งหมด <b style={{ fontFamily: "var(--mono)", color: "var(--text2)" }}>{leads.all.toLocaleString()}</b> ราย
-              </span>
-              {leads.due > 0 && (
-                <span style={{ color: "var(--red)" }}>
-                  ต้องติดตาม <b style={{ fontFamily: "var(--mono)" }}>{leads.due.toLocaleString()}</b> ราย
-                </span>
-              )}
-            </div>
-          )}
         </Link>
       )}
-      */}
 
       <div style={{ textAlign: "center", marginTop: 28, fontSize: 14, color: "var(--text3)" }}>
         ซัพพลายเออร์แยกกันในแต่ละระบบ · Each system keeps its own suppliers
